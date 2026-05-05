@@ -7,7 +7,7 @@ from docx import Document
 from docx.shared import Cm
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import plotly.express as px  # <-- Đừng quên dòng này để vẽ biểu đồ nhé sếp!
+import plotly.express as px
 
 # 1. KẾT NỐI
 URL = st.secrets["SUPABASE_URL"]
@@ -15,73 +15,64 @@ KEY = st.secrets["SUPABASE_KEY"]
 ADMIN_PASS = st.secrets.get("ADMIN_PASS", "tuyenquang2026")
 supabase = create_client(URL, KEY)
 
-# Hàm tạo file Word báo cáo (ÉP CHUẨN KÍCH THƯỚC VÀ RÚT GỌN LINK)
+# Hàm tạo file Word báo cáo (CHUẨN 6 CỘT THEO ẢNH, ẨN LINK)
 def tao_file_word(df, ngay_thang):
     doc = Document()
     
-    # --- CÀI ĐẶT KHỔ GIẤY NGANG VÀ CĂN SÁT LỀ ---
+    # Cài đặt khổ giấy ngang
     section = doc.sections[0]
     new_width, new_height = section.page_height, section.page_width
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width = new_width
     section.page_height = new_height
-    
-    section.left_margin = Cm(1.5)
-    section.right_margin = Cm(1.5)
-    section.top_margin = Cm(1.5)
-    section.bottom_margin = Cm(1.5)
+    section.left_margin, section.right_margin = Cm(1.5), Cm(1.5)
+    section.top_margin, section.bottom_margin = Cm(1.5), Cm(1.5)
 
-    # --- TIÊU ĐỀ ---
+    # Tiêu đề
     heading = doc.add_heading('BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI', 1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_ngay = doc.add_paragraph(f'Ngày tổng hợp: {ngay_thang}\n')
     p_ngay.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # --- TẠO BẢNG VÀ TẮT TỰ ĐỘNG CO GIÃN CỦA WORD ---
-    table = doc.add_table(rows=1, cols=5)
+    # Tạo bảng 6 cột
+    table = doc.add_table(rows=1, cols=6)
     table.style = 'Table Grid'
     table.autofit = False
     table.allow_autofit = False
     
-    # Chia tỷ lệ chuẩn cho khổ A4 ngang (Tổng ~ 26.5 cm)
-    widths = (Cm(1.2), Cm(7.5), Cm(3.5), Cm(10.5), Cm(3.8))
+    # Tỷ lệ 6 cột cho khổ A4 ngang (~26.5 cm)
+    widths = (Cm(1.2), Cm(8.5), Cm(3.5), Cm(4.5), Cm(4.5), Cm(4.3))
     
     for i, col in enumerate(table.columns):
         col.width = widths[i]
         
     hdr = table.rows[0].cells
-    headers = ['STT', 'Tiêu đề', 'Người gửi', 'Nguồn / File đính kèm', 'Đề xuất MXH']
+    headers = ['STT', 'Tiêu đề', 'Người gửi', 'Nguồn / File đính kèm', 'Đề xuất MXH', 'Người đăng']
     
     for i, h in enumerate(headers):
         hdr[i].text = h
-        hdr[i].width = widths[i]
         hdr[i].paragraphs[0].runs[0].bold = True
 
-    # --- ĐỔ DỮ LIỆU ---
+    # Đổ dữ liệu
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
         row_cells[0].text = str(idx)
         row_cells[1].text = str(row.tieu_de)
         row_cells[2].text = str(row.nguoi_gui)
         
-        # Xử lý cắt ngắn Link dài để Word không bị vỡ bảng
-        link = str(row.duong_dan).strip()
-        if link.lower() == 'nan' or link == "" or link.lower() == 'empty':
-            link_hien_thi = "Không có"
-        else:
-            if len(link) > 60:
-                link_hien_thi = link[:40] + "... (Xem link tải trực tiếp trên Web)"
-            else:
-                link_hien_thi = link
-                
-        row_cells[3].text = f"{row.nguon_tin}\nLink/File: {link_hien_thi}"
+        # Ẩn link, chỉ hiện nguồn tin theo đúng yêu cầu
+        row_cells[3].text = str(row.nguon_tin)
         
-        mxh = []
+        # Xử lý MXH
+        mxh = ["Đăng Web"] # Mặc định luôn có Đăng Web
         if row.dang_facebook: mxh.append("Facebook")
         if row.dang_zalo: mxh.append("Zalo OA")
-        row_cells[4].text = ", ".join(mxh) if mxh else "Đăng Web"
+        row_cells[4].text = ", ".join(mxh)
         
-        # Ép lại chiều rộng cho từng ô của dòng mới
+        # Cột Người đăng mới
+        row_cells[5].text = str(row.nguoi_dang) if pd.notna(row.nguoi_dang) else ""
+        
+        # Ép lại chiều rộng
         for i, cell in enumerate(row_cells):
             cell.width = widths[i]
 
@@ -92,7 +83,6 @@ def tao_file_word(df, ngay_thang):
 def main():
     st.set_page_config(page_title="Hệ thống Quản lý Tin bài", layout="wide")
     
-    # ĐỔI TIÊU ĐỀ HOÀNH TRÁNG CHO BAN TUYÊN GIÁO
     st.markdown("""
         <div style="background-color:#004B87; padding:20px; border-radius:10px; color:white; text-align:center;">
             <h2 style="margin:0; font-size: 1.8rem; text-transform: uppercase;">Hệ thống quản lý tin bài đăng trang Thông tin điện tử</h2>
@@ -118,8 +108,8 @@ def main():
             
             st.markdown("---")
             st.markdown("### 🔹 NẾU LÀ TIN VIẾT MỚI:")
-            st.caption("Có thể chọn nhiều file cùng lúc. Tiêu đề bài sẽ tự động lấy theo tên file.")
-            file_uploads = st.file_uploader("Tải lên các file (Word/PDF/Ảnh):", type=["doc", "docx", "pdf", "png", "jpg"], accept_multiple_files=True)
+            tieu_de_viet_moi = st.text_input("Tiêu đề bài viết (*Bắt buộc nếu chọn Viết mới):", placeholder="Ví dụ: Infographic cuộc thi Tìm hiểu về chuyển đổi số...")
+            file_uploads = st.file_uploader("Tải lên các file đính kèm (Có thể chọn nhiều file cùng lúc):", type=["doc", "docx", "pdf", "png", "jpg"], accept_multiple_files=True)
             
             st.markdown("### 🔹 NẾU LÀ TIN SƯU TẦM (Đăng lại):")
             st.caption("Gõ trực tiếp vào bảng dưới. Bấm dấu cộng (+) ở góc dưới bảng để thêm dòng mới.")
@@ -134,37 +124,43 @@ def main():
                 if not nguoi_gui.strip():
                     st.error("Đồng chí vui lòng điền Họ và tên trước khi gửi!")
                 else:
-                    count = 0
                     nguoi_gui_clean = str(nguoi_gui).strip()
                     nguon_clean = str(nguon).strip()
                     ghi_chu_clean = str(ghi_chu).strip() if pd.notna(ghi_chu) else ""
 
                     if nguon == "Viết mới":
-                        if not file_uploads:
+                        if not tieu_de_viet_moi.strip():
+                            st.error("Đồng chí vui lòng nhập Tiêu đề bài viết!")
+                        elif not file_uploads:
                             st.error("Đồng chí chọn 'Viết mới' nhưng chưa tải file nào lên!")
                         else:
+                            danh_sach_link = []
                             for f in file_uploads:
                                 file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
-                                link_chinh = ""
                                 try:
                                     supabase.storage.from_("tin_bai").upload(file_name, f.read())
                                     link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
+                                    danh_sach_link.append(link_chinh)
                                 except Exception as e:
-                                    st.error(f"Lỗi tải file lên hệ thống lưu trữ! Chi tiết lỗi: {e}")
-                                
-                                tieu_de_file = f.name.rsplit('.', 1)[0] 
-                                data = {"nguoi_gui": nguoi_gui_clean, "tieu_de": str(tieu_de_file).strip(), "nguon_tin": nguon_clean, "duong_dan": str(link_chinh).strip(), "ghi_chu": ghi_chu_clean}
-                                supabase.table("dang_ky_tin_bai").insert(data).execute()
-                                count += 1
-                            st.success(f"🎉 Đã gửi thành công {count} bài viết mới!")
-                    
-                    else:
-                        for index, row in edited_links.iterrows():
-                            t_de = str(row["tieu_de"]) if pd.notna(row["tieu_de"]) else ""
-                            l_ink = str(row["link"]) if pd.notna(row["link"]) else ""
+                                    st.error(f"Lỗi tải file {f.name}: {e}")
                             
-                            t_de = t_de.strip()
-                            l_ink = l_ink.strip()
+                            # Gộp tất cả link vào chung 1 bài viết
+                            link_tong_hop = "\n".join(danh_sach_link)
+                            data = {
+                                "nguoi_gui": nguoi_gui_clean, 
+                                "tieu_de": tieu_de_viet_moi.strip(), 
+                                "nguon_tin": nguon_clean, 
+                                "duong_dan": link_tong_hop, 
+                                "ghi_chu": ghi_chu_clean
+                            }
+                            supabase.table("dang_ky_tin_bai").insert(data).execute()
+                            st.success(f"🎉 Đã gửi thành công 1 bài viết mới (kèm {len(file_uploads)} file đính kèm)!")
+                    
+                    else: # Xử lý tin sưu tầm
+                        count = 0
+                        for index, row in edited_links.iterrows():
+                            t_de = str(row["tieu_de"]).strip() if pd.notna(row["tieu_de"]) else ""
+                            l_ink = str(row["link"]).strip() if pd.notna(row["link"]) else ""
                             
                             if t_de and t_de.lower() != "nan":
                                 if l_ink.lower() == "nan": l_ink = ""
@@ -187,15 +183,17 @@ def main():
             
             if res_today.data:
                 df_today = pd.DataFrame(res_today.data)
-                df_today['duong_dan'] = df_today['duong_dan'].fillna("").astype(str)
-                df_today.loc[df_today['duong_dan'].str.lower() == 'nan', 'duong_dan'] = ""
+                
+                # Tạo thêm cột Người đăng để Admin gõ trực tiếp trên web
+                df_today['nguoi_dang'] = ""
 
                 edited_df = st.data_editor(
                     df_today,
                     column_config={
                         "dang_facebook": st.column_config.CheckboxColumn("Đăng FB", default=False),
                         "dang_zalo": st.column_config.CheckboxColumn("Đăng Zalo", default=False),
-                        "duong_dan": st.column_config.LinkColumn("Link tải file/báo gốc", display_text="Bấm vào đây để xem/tải")
+                        "duong_dan": st.column_config.TextColumn("Danh sách Link (Bôi đen copy nếu cần)"),
+                        "nguoi_dang": st.column_config.TextColumn("Người đăng (Gõ tên để xuất file)")
                     },
                     disabled=["nguoi_gui", "tieu_de", "nguon_tin"],
                     hide_index=True
@@ -208,6 +206,7 @@ def main():
                             supabase.table("dang_ky_tin_bai").update({"dang_facebook": row["dang_facebook"], "dang_zalo": row["dang_zalo"]}).eq("id", row["id"]).execute()
                         st.success("Đã lưu đánh dấu Mạng xã hội!")
                 with c_xuat:
+                    # Gửi dataframe ĐÃ CHỈNH SỬA (có chứa Người đăng) vào hàm tạo Word
                     word_data = tao_file_word(edited_df, today_str)
                     st.download_button("📥 Xuất file Word trình duyệt", data=word_data, file_name=f"TinBai_{datetime.now().strftime('%Y%m%d')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             else:
