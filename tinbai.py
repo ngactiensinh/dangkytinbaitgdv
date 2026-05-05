@@ -4,7 +4,9 @@ from supabase import create_client
 from datetime import datetime
 import io
 from docx import Document
-import plotly.express as px
+from docx.shared import Cm
+from docx.enum.section import WD_ORIENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # 1. KẾT NỐI
 URL = st.secrets["SUPABASE_URL"]
@@ -12,30 +14,53 @@ KEY = st.secrets["SUPABASE_KEY"]
 ADMIN_PASS = st.secrets.get("ADMIN_PASS", "tuyenquang2026")
 supabase = create_client(URL, KEY)
 
-# Hàm tạo file Word báo cáo (ĐÃ SỬA THÀNH 5 CỘT)
+# Hàm tạo file Word báo cáo (ĐÃ NÂNG CẤP GIAO DIỆN)
 def tao_file_word(df, ngay_thang):
     doc = Document()
-    doc.add_heading('BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI', 1)
-    doc.add_paragraph(f'Ngày tổng hợp: {ngay_thang}\n')
     
+    # --- CÀI ĐẶT KHỔ GIẤY NGANG VÀ CĂN SÁT LỀ ---
+    section = doc.sections[0]
+    new_width, new_height = section.page_height, section.page_width
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = new_width
+    section.page_height = new_height
+    
+    # Chỉnh lề cách mép giấy 1.5 cm cho rộng rãi
+    section.left_margin = Cm(1.5)
+    section.right_margin = Cm(1.5)
+    section.top_margin = Cm(1.5)
+    section.bottom_margin = Cm(1.5)
+
+    # --- TIÊU ĐỀ BÁO CÁO CĂN GIỮA ---
+    heading = doc.add_heading('BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI', 1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_ngay = doc.add_paragraph(f'Ngày tổng hợp: {ngay_thang}\n')
+    p_ngay.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # --- TẠO BẢNG VÀ CHIA KÍCH THƯỚC CỘT ---
     table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
+    
+    # Set độ rộng chuẩn cho từng cột (Tổng khoảng 26cm khổ A4 ngang)
+    widths = [Cm(1.5), Cm(8.0), Cm(4.5), Cm(9.0), Cm(3.5)]
+    
     hdr = table.rows[0].cells
-    hdr[0].text = 'STT'
-    hdr[1].text = 'Tiêu đề'
-    hdr[2].text = 'Người gửi'
-    hdr[3].text = 'Nguồn / File đính kèm'
-    hdr[4].text = 'Đề xuất MXH'
+    headers = ['STT', 'Tiêu đề', 'Người gửi', 'Nguồn / File đính kèm', 'Đề xuất MXH']
+    
+    for i, h in enumerate(headers):
+        hdr[i].text = h
+        # In đậm tiêu đề bảng
+        hdr[i].paragraphs[0].runs[0].bold = True
 
+    # --- ĐỔ DỮ LIỆU VÀO BẢNG ---
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
         row_cells[0].text = str(idx)
         row_cells[1].text = str(row.tieu_de)
         row_cells[2].text = str(row.nguoi_gui)
         
-        # Xử lý link sạch sẽ
         link = str(row.duong_dan).strip()
-        if link.lower() == 'nan' or link == "":
+        if link.lower() == 'nan' or link == "" or link.lower() == 'empty':
             link_hien_thi = "Không có"
         else:
             link_hien_thi = link
@@ -46,7 +71,12 @@ def tao_file_word(df, ngay_thang):
         if row.dang_facebook: mxh.append("Facebook")
         if row.dang_zalo: mxh.append("Zalo OA")
         row_cells[4].text = ", ".join(mxh) if mxh else "Đăng Web"
-    
+
+    # Áp dụng lại độ rộng cho tất cả các dòng (Bắt buộc với python-docx)
+    for row in table.rows:
+        for idx, width in enumerate(widths):
+            row.cells[idx].width = width
+
     bio = io.BytesIO()
     doc.save(bio)
     return bio.getvalue()
@@ -55,16 +85,14 @@ def main():
     st.set_page_config(page_title="Hệ thống Quản lý Tin bài", layout="wide")
     st.markdown('<div style="background-color:#004B87;padding:15px;border-radius:10px;color:white;text-align:center;"><h1>📝 HỆ THỐNG QUẢN LÝ TIN BÀI 4.0</h1></div>', unsafe_allow_html=True)
 
-    # Sidebar quản trị
     with st.sidebar:
         st.header("🔐 Dành cho Quản trị")
         mat_khau_nhap = st.text_input("Nhập mật khẩu để thao tác:", type="password")
         is_admin = (mat_khau_nhap == ADMIN_PASS)
 
-    # TẠO 3 TAB
     tab1, tab2, tab3 = st.tabs(["✍️ Đăng ký tin bài", "📊 Tổng hợp hàng ngày", "📈 Thống kê & Biểu đồ"])
 
-    # --- TAB 1: ĐĂNG KÝ (DÀNH CHO MỌI NGƯỜI) ---
+    # --- TAB 1: ĐĂNG KÝ ---
     with tab1:
         st.subheader("Gửi thông tin bài viết")
         
@@ -103,11 +131,10 @@ def main():
                                 file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
                                 link_chinh = ""
                                 try:
-                                    # Cảnh báo rõ nếu đẩy file lên Storage thất bại
                                     res_upload = supabase.storage.from_("tin_bai").upload(file_name, f.read())
                                     link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
                                 except Exception as e:
-                                    st.error(f"Lỗi khi tải file '{f.name}' lên hệ thống lưu trữ! Vui lòng kiểm tra lại Bucket 'tin_bai' trên Supabase. Chi tiết lỗi: {e}")
+                                    st.error(f"Lỗi khi tải file '{f.name}' lên hệ thống lưu trữ! Chi tiết lỗi: {e}")
                                 
                                 tieu_de_file = f.name.rsplit('.', 1)[0] 
                                 data = {
@@ -121,7 +148,7 @@ def main():
                                 count += 1
                             st.success(f"🎉 Đã gửi thành công {count} bài viết mới!")
                     
-                    else: # Tin sưu tầm
+                    else:
                         for index, row in edited_links.iterrows():
                             t_de = str(row["tieu_de"]) if pd.notna(row["tieu_de"]) else ""
                             l_ink = str(row["link"]) if pd.notna(row["link"]) else ""
@@ -151,7 +178,6 @@ def main():
             if res_today.data:
                 df_today = pd.DataFrame(res_today.data)
                 
-                # Ép kiểu dữ liệu để tránh lỗi hiển thị Link
                 df_today['duong_dan'] = df_today['duong_dan'].fillna("").astype(str)
                 df_today.loc[df_today['duong_dan'].str.lower() == 'nan', 'duong_dan'] = ""
 
