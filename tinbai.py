@@ -82,6 +82,11 @@ def main():
                     st.error("Đồng chí vui lòng điền Họ và tên trước khi gửi!")
                 else:
                     count = 0
+                    # Tinh chỉnh, làm sạch dữ liệu trước khi gửi
+                    nguoi_gui_clean = str(nguoi_gui).strip()
+                    nguon_clean = str(nguon).strip()
+                    ghi_chu_clean = str(ghi_chu).strip() if pd.notna(ghi_chu) else ""
+
                     if nguon == "Viết mới":
                         if not file_uploads:
                             st.error("Đồng chí chọn 'Viết mới' nhưng chưa tải file nào lên!")
@@ -95,23 +100,46 @@ def main():
                                 except Exception:
                                     pass
                                 
-                                # Lấy tên file làm tiêu đề (cắt bỏ đuôi mở rộng)
                                 tieu_de_file = f.name.rsplit('.', 1)[0] 
-                                data = {"nguoi_gui": nguoi_gui, "tieu_de": tieu_de_file, "nguon_tin": nguon, "duong_dan": link_chinh, "ghi_chu": ghi_chu}
+                                data = {
+                                    "nguoi_gui": nguoi_gui_clean, 
+                                    "tieu_de": str(tieu_de_file).strip(), 
+                                    "nguon_tin": nguon_clean, 
+                                    "duong_dan": str(link_chinh).strip(), 
+                                    "ghi_chu": ghi_chu_clean
+                                }
                                 supabase.table("dang_ky_tin_bai").insert(data).execute()
                                 count += 1
                             st.success(f"🎉 Đã gửi thành công {count} bài viết mới! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
                     
                     else: # Tin sưu tầm
-                        valid_rows = [row for index, row in edited_links.iterrows() if str(row["tieu_de"]).strip() != ""]
-                        if not valid_rows:
-                            st.error("Đồng chí chọn 'Đăng lại' nhưng chưa điền Tiêu đề nào vào bảng!")
-                        else:
-                            for row in valid_rows:
-                                data = {"nguoi_gui": nguoi_gui, "tieu_de": row["tieu_de"], "nguon_tin": nguon, "duong_dan": row["link"], "ghi_chu": ghi_chu}
+                        for index, row in edited_links.iterrows():
+                            # Bộ lọc "Thép": Ép kiểu và loại bỏ NaN tuyệt đối
+                            t_de = str(row["tieu_de"]) if pd.notna(row["tieu_de"]) else ""
+                            l_ink = str(row["link"]) if pd.notna(row["link"]) else ""
+                            
+                            t_de = t_de.strip()
+                            l_ink = l_ink.strip()
+                            
+                            # Chỉ lấy những dòng mà tiêu đề có nội dung thực sự
+                            if t_de and t_de.lower() != "nan":
+                                if l_ink.lower() == "nan":
+                                    l_ink = ""
+                                    
+                                data = {
+                                    "nguoi_gui": nguoi_gui_clean, 
+                                    "tieu_de": t_de, 
+                                    "nguon_tin": nguon_clean, 
+                                    "duong_dan": l_ink, 
+                                    "ghi_chu": ghi_chu_clean
+                                }
                                 supabase.table("dang_ky_tin_bai").insert(data).execute()
                                 count += 1
+                                
+                        if count > 0:
                             st.success(f"🎉 Đã gửi thành công {count} bài sưu tầm! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
+                        else:
+                            st.error("Đồng chí chọn 'Đăng lại' nhưng chưa điền Tiêu đề hợp lệ nào vào bảng!")
 
     # --- TAB 2: TỔNG HỢP TRÌNH DUYỆT (Chỉ Admin thấy nội dung) ---
     with tab2:
@@ -146,15 +174,13 @@ def main():
             else:
                 st.info("Hôm nay chưa có ai gửi bài.")
 
-            # Nút XÓA SẠCH DỮ LIỆU
             st.divider()
             st.warning("⚠️ Khu vực dọn dẹp dữ liệu")
             if st.button("🗑️ Xóa sạch toàn bộ tin bài (Reset dữ liệu test)"):
                 try:
-                    # Lệnh này sẽ xóa mọi dòng có id khác 0 (nghĩa là xóa tất cả)
                     supabase.table("dang_ky_tin_bai").delete().neq("id", 0).execute()
                     st.success("Đã dọn dẹp sạch sẽ toàn bộ dữ liệu test!")
-                    st.rerun() # Refresh lại trang ngay lập tức
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Có lỗi khi xóa: {e}")
         else:
