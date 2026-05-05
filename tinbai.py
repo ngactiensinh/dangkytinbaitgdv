@@ -12,31 +12,40 @@ KEY = st.secrets["SUPABASE_KEY"]
 ADMIN_PASS = st.secrets.get("ADMIN_PASS", "tuyenquang2026")
 supabase = create_client(URL, KEY)
 
-# Hàm tạo file Word báo cáo
+# Hàm tạo file Word báo cáo (ĐÃ SỬA THÀNH 5 CỘT)
 def tao_file_word(df, ngay_thang):
     doc = Document()
     doc.add_heading('BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI', 1)
     doc.add_paragraph(f'Ngày tổng hợp: {ngay_thang}\n')
     
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
     hdr = table.rows[0].cells
     hdr[0].text = 'STT'
-    hdr[1].text = 'Tiêu đề / Người gửi'
-    hdr[2].text = 'Nguồn / File đính kèm'
-    hdr[3].text = 'Đề xuất MXH'
+    hdr[1].text = 'Tiêu đề'
+    hdr[2].text = 'Người gửi'
+    hdr[3].text = 'Nguồn / File đính kèm'
+    hdr[4].text = 'Đề xuất MXH'
 
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
         row_cells[0].text = str(idx)
-        row_cells[1].text = f"{row.tieu_de}\n(Gửi bởi: {row.nguoi_gui})"
-        link_hien_thi = str(row.duong_dan) if row.duong_dan else "Không có"
-        row_cells[2].text = f"{row.nguon_tin}\nLink/File: {link_hien_thi}"
+        row_cells[1].text = str(row.tieu_de)
+        row_cells[2].text = str(row.nguoi_gui)
+        
+        # Xử lý link sạch sẽ
+        link = str(row.duong_dan).strip()
+        if link.lower() == 'nan' or link == "":
+            link_hien_thi = "Không có"
+        else:
+            link_hien_thi = link
+            
+        row_cells[3].text = f"{row.nguon_tin}\nLink/File: {link_hien_thi}"
         
         mxh = []
         if row.dang_facebook: mxh.append("Facebook")
         if row.dang_zalo: mxh.append("Zalo OA")
-        row_cells[3].text = ", ".join(mxh) if mxh else "Đăng Web"
+        row_cells[4].text = ", ".join(mxh) if mxh else "Đăng Web"
     
     bio = io.BytesIO()
     doc.save(bio)
@@ -69,12 +78,12 @@ def main():
             file_uploads = st.file_uploader("Tải lên các file (Word/PDF/Ảnh):", type=["doc", "docx", "pdf", "png", "jpg"], accept_multiple_files=True)
             
             st.markdown("### 🔹 NẾU LÀ TIN SƯU TẦM (Đăng lại):")
-            st.caption("Gõ trực tiếp vào bảng dưới. Bấm dấu cộng (+) ở góc dưới bảng để thêm dòng mới nếu gửi nhiều bài.")
+            st.caption("Gõ trực tiếp vào bảng dưới. Bấm dấu cộng (+) ở góc dưới bảng để thêm dòng mới.")
             df_links = pd.DataFrame([{"tieu_de": "", "link": ""}])
             edited_links = st.data_editor(df_links, num_rows="dynamic", column_config={"tieu_de": "Tiêu đề bài sưu tầm", "link": "Đường dẫn (Link bài gốc)"}, use_container_width=True)
             
             st.markdown("---")
-            ghi_chu = st.text_area("Ghi chú chung (Áp dụng cho tất cả các bài gửi trong lần này):")
+            ghi_chu = st.text_area("Ghi chú chung:")
             btn_gui = st.form_submit_button("Gửi đăng ký tin bài")
             
             if btn_gui:
@@ -82,7 +91,6 @@ def main():
                     st.error("Đồng chí vui lòng điền Họ và tên trước khi gửi!")
                 else:
                     count = 0
-                    # Tinh chỉnh, làm sạch dữ liệu trước khi gửi
                     nguoi_gui_clean = str(nguoi_gui).strip()
                     nguon_clean = str(nguon).strip()
                     ghi_chu_clean = str(ghi_chu).strip() if pd.notna(ghi_chu) else ""
@@ -95,10 +103,11 @@ def main():
                                 file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
                                 link_chinh = ""
                                 try:
-                                    supabase.storage.from_("tin_bai").upload(file_name, f.read())
+                                    # Cảnh báo rõ nếu đẩy file lên Storage thất bại
+                                    res_upload = supabase.storage.from_("tin_bai").upload(file_name, f.read())
                                     link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    st.error(f"Lỗi khi tải file '{f.name}' lên hệ thống lưu trữ! Vui lòng kiểm tra lại Bucket 'tin_bai' trên Supabase. Chi tiết lỗi: {e}")
                                 
                                 tieu_de_file = f.name.rsplit('.', 1)[0] 
                                 data = {
@@ -110,38 +119,28 @@ def main():
                                 }
                                 supabase.table("dang_ky_tin_bai").insert(data).execute()
                                 count += 1
-                            st.success(f"🎉 Đã gửi thành công {count} bài viết mới! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
+                            st.success(f"🎉 Đã gửi thành công {count} bài viết mới!")
                     
                     else: # Tin sưu tầm
                         for index, row in edited_links.iterrows():
-                            # Bộ lọc "Thép": Ép kiểu và loại bỏ NaN tuyệt đối
                             t_de = str(row["tieu_de"]) if pd.notna(row["tieu_de"]) else ""
                             l_ink = str(row["link"]) if pd.notna(row["link"]) else ""
                             
                             t_de = t_de.strip()
                             l_ink = l_ink.strip()
                             
-                            # Chỉ lấy những dòng mà tiêu đề có nội dung thực sự
                             if t_de and t_de.lower() != "nan":
-                                if l_ink.lower() == "nan":
-                                    l_ink = ""
-                                    
-                                data = {
-                                    "nguoi_gui": nguoi_gui_clean, 
-                                    "tieu_de": t_de, 
-                                    "nguon_tin": nguon_clean, 
-                                    "duong_dan": l_ink, 
-                                    "ghi_chu": ghi_chu_clean
-                                }
+                                if l_ink.lower() == "nan": l_ink = ""
+                                data = {"nguoi_gui": nguoi_gui_clean, "tieu_de": t_de, "nguon_tin": nguon_clean, "duong_dan": l_ink, "ghi_chu": ghi_chu_clean}
                                 supabase.table("dang_ky_tin_bai").insert(data).execute()
                                 count += 1
                                 
                         if count > 0:
-                            st.success(f"🎉 Đã gửi thành công {count} bài sưu tầm! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
+                            st.success(f"🎉 Đã gửi thành công {count} bài sưu tầm!")
                         else:
-                            st.error("Đồng chí chọn 'Đăng lại' nhưng chưa điền Tiêu đề hợp lệ nào vào bảng!")
+                            st.error("Vui lòng điền ít nhất một tiêu đề bài sưu tầm hợp lệ!")
 
-    # --- TAB 2: TỔNG HỢP TRÌNH DUYỆT (Chỉ Admin thấy nội dung) ---
+    # --- TAB 2: TỔNG HỢP TRÌNH DUYỆT ---
     with tab2:
         if is_admin:
             today_str = datetime.now().strftime('%d/%m/%Y')
@@ -151,12 +150,17 @@ def main():
             
             if res_today.data:
                 df_today = pd.DataFrame(res_today.data)
+                
+                # Ép kiểu dữ liệu để tránh lỗi hiển thị Link
+                df_today['duong_dan'] = df_today['duong_dan'].fillna("").astype(str)
+                df_today.loc[df_today['duong_dan'].str.lower() == 'nan', 'duong_dan'] = ""
+
                 edited_df = st.data_editor(
                     df_today,
                     column_config={
                         "dang_facebook": st.column_config.CheckboxColumn("Đăng FB", default=False),
                         "dang_zalo": st.column_config.CheckboxColumn("Đăng Zalo", default=False),
-                        "duong_dan": st.column_config.LinkColumn("Link/File")
+                        "duong_dan": st.column_config.LinkColumn("Link tải file/báo gốc", display_text="Bấm vào đây để xem/tải")
                     },
                     disabled=["nguoi_gui", "tieu_de", "nguon_tin"],
                     hide_index=True
@@ -179,14 +183,14 @@ def main():
             if st.button("🗑️ Xóa sạch toàn bộ tin bài (Reset dữ liệu test)"):
                 try:
                     supabase.table("dang_ky_tin_bai").delete().neq("id", 0).execute()
-                    st.success("Đã dọn dẹp sạch sẽ toàn bộ dữ liệu test!")
+                    st.success("Đã dọn dẹp sạch sẽ toàn bộ dữ liệu!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Có lỗi khi xóa: {e}")
         else:
             st.warning("Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để xem và thao tác phần này.")
 
-    # --- TAB 3: THỐNG KÊ & BIỂU ĐỒ ---
+    # --- TAB 3: THỐNG KÊ ---
     with tab3:
         st.subheader("Báo cáo số lượng tin bài")
         res_all = supabase.table("dang_ky_tin_bai").select("*").execute()
@@ -194,40 +198,24 @@ def main():
         if res_all.data:
             df_all = pd.DataFrame(res_all.data)
             df_all['ngay_dang_ky'] = pd.to_datetime(df_all['ngay_dang_ky'])
-            df_all['Tháng'] = df_all['ngay_dang_ky'].dt.month
-            df_all['Quý'] = df_all['ngay_dang_ky'].dt.quarter
             df_all['Năm'] = df_all['ngay_dang_ky'].dt.year
 
-            f_col1, f_col2, f_col3 = st.columns(3)
-            with f_col1:
-                ds_nam = df_all['Năm'].unique().tolist()
-                chon_nam = st.selectbox("Năm:", ds_nam, index=ds_nam.index(datetime.now().year) if datetime.now().year in ds_nam else 0)
-            with f_col2:
-                chon_quy = st.selectbox("Quý:", ["Tất cả", 1, 2, 3, 4])
-            with f_col3:
-                chon_thang = st.selectbox("Tháng:", ["Tất cả"] + list(range(1, 13)))
-
+            chon_nam = st.selectbox("Năm:", df_all['Năm'].unique().tolist())
             df_loc = df_all[df_all['Năm'] == chon_nam]
-            if chon_quy != "Tất cả": df_loc = df_loc[df_loc['Quý'] == chon_quy]
-            if chon_thang != "Tất cả": df_loc = df_loc[df_loc['Tháng'] == chon_thang]
 
             if not df_loc.empty:
-                st.write("---")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Tổng số bài", len(df_loc))
-                m2.metric("Bài tự viết mới", len(df_loc[df_loc['nguon_tin'] == 'Viết mới']))
-                m3.metric("Bài đề nghị đăng lại", len(df_loc[df_loc['nguon_tin'] == 'Đề nghị đăng lại']))
+                m2.metric("Bài tự viết", len(df_loc[df_loc['nguon_tin'] == 'Viết mới']))
+                m3.metric("Bài sưu tầm", len(df_loc[df_loc['nguon_tin'] == 'Đề nghị đăng lại']))
 
-                st.markdown("##### 🏆 Thống kê năng suất cán bộ")
                 df_bieu_do = df_loc.groupby(['nguoi_gui', 'nguon_tin']).size().reset_index(name='Số lượng')
-                fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', 
-                             title="Theo dõi chỉ tiêu tin bài", barmode='group',
-                             labels={'nguoi_gui': 'Cán bộ', 'Số lượng': 'Số bài'})
+                fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', barmode='group')
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("Không có dữ liệu trong khoảng thời gian này.")
+                st.info("Không có dữ liệu.")
         else:
-            st.info("Hệ thống chưa có dữ liệu để thống kê.")
+            st.info("Chưa có dữ liệu.")
 
 if __name__ == "__main__":
     main()
