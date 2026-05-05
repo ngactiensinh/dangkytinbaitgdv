@@ -176,19 +176,25 @@ def main():
     # --- TAB 2: TỔNG HỢP TRÌNH DUYỆT ---
     with tab2:
         if is_admin:
-            today_str = datetime.now().strftime('%d/%m/%Y')
-            st.subheader(f"Bảng tổng hợp trình duyệt (Ngày {today_str})")
+            st.subheader("Bảng tổng hợp trình duyệt")
             
-            res_today = supabase.table("dang_ky_tin_bai").select("*").eq("ngay_dang_ky", datetime.now().date().isoformat()).execute()
+            # 🌟 TÍNH NĂNG MỚI: BỘ LỌC CHỌN NGÀY
+            ngay_xem = st.date_input("Chọn ngày muốn xem và xuất báo cáo:", datetime.now().date())
+            ngay_xem_str = ngay_xem.strftime('%d/%m/%Y')
             
-            if res_today.data:
-                df_today = pd.DataFrame(res_today.data)
+            # Lọc dữ liệu theo ngày bạn chọn thay vì chốt cứng hôm nay
+            res_ngay = supabase.table("dang_ky_tin_bai").select("*").eq("ngay_dang_ky", ngay_xem.isoformat()).execute()
+            
+            if res_ngay.data:
+                df_ngay = pd.DataFrame(res_ngay.data)
                 
-                # Tạo thêm cột Người đăng để Admin gõ trực tiếp trên web
-                df_today['nguoi_dang'] = ""
+                if 'nguoi_dang' not in df_ngay.columns:
+                    df_ngay['nguoi_dang'] = ""
+                else:
+                    df_ngay['nguoi_dang'] = df_ngay['nguoi_dang'].fillna("")
 
                 edited_df = st.data_editor(
-                    df_today,
+                    df_ngay,
                     column_config={
                         "dang_facebook": st.column_config.CheckboxColumn("Đăng FB", default=False),
                         "dang_zalo": st.column_config.CheckboxColumn("Đăng Zalo", default=False),
@@ -206,11 +212,10 @@ def main():
                             supabase.table("dang_ky_tin_bai").update({"dang_facebook": row["dang_facebook"], "dang_zalo": row["dang_zalo"]}).eq("id", row["id"]).execute()
                         st.success("Đã lưu đánh dấu Mạng xã hội!")
                 with c_xuat:
-                    # Gửi dataframe ĐÃ CHỈNH SỬA (có chứa Người đăng) vào hàm tạo Word
-                    word_data = tao_file_word(edited_df, today_str)
-                    st.download_button("📥 Xuất file Word trình duyệt", data=word_data, file_name=f"TinBai_{datetime.now().strftime('%Y%m%d')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    word_data = tao_file_word(edited_df, ngay_xem_str)
+                    st.download_button("📥 Xuất file Word trình duyệt", data=word_data, file_name=f"TinBai_{ngay_xem.strftime('%Y%m%d')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             else:
-                st.info("Hôm nay chưa có ai gửi bài.")
+                st.info(f"Không có tin bài nào được đăng ký trong ngày {ngay_xem_str}.")
 
             st.divider()
             st.warning("⚠️ Khu vực dọn dẹp dữ liệu")
