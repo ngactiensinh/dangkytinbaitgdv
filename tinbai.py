@@ -7,6 +7,7 @@ from docx import Document
 from docx.shared import Cm
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import plotly.express as px  # <-- Đừng quên dòng này để vẽ biểu đồ nhé sếp!
 
 # 1. KẾT NỐI
 URL = st.secrets["SUPABASE_URL"]
@@ -14,7 +15,7 @@ KEY = st.secrets["SUPABASE_KEY"]
 ADMIN_PASS = st.secrets.get("ADMIN_PASS", "tuyenquang2026")
 supabase = create_client(URL, KEY)
 
-# Hàm tạo file Word báo cáo (ĐÃ NÂNG CẤP GIAO DIỆN)
+# Hàm tạo file Word báo cáo (ÉP CHUẨN KÍCH THƯỚC VÀ RÚT GỌN LINK)
 def tao_file_word(df, ngay_thang):
     doc = Document()
     
@@ -25,57 +26,64 @@ def tao_file_word(df, ngay_thang):
     section.page_width = new_width
     section.page_height = new_height
     
-    # Chỉnh lề cách mép giấy 1.5 cm cho rộng rãi
     section.left_margin = Cm(1.5)
     section.right_margin = Cm(1.5)
     section.top_margin = Cm(1.5)
     section.bottom_margin = Cm(1.5)
 
-    # --- TIÊU ĐỀ BÁO CÁO CĂN GIỮA ---
+    # --- TIÊU ĐỀ ---
     heading = doc.add_heading('BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI', 1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_ngay = doc.add_paragraph(f'Ngày tổng hợp: {ngay_thang}\n')
     p_ngay.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # --- TẠO BẢNG VÀ CHIA KÍCH THƯỚC CỘT ---
+    # --- TẠO BẢNG VÀ TẮT TỰ ĐỘNG CO GIÃN CỦA WORD ---
     table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
+    table.autofit = False
+    table.allow_autofit = False
     
-    # Set độ rộng chuẩn cho từng cột (Tổng khoảng 26cm khổ A4 ngang)
-    widths = [Cm(1.5), Cm(8.0), Cm(4.5), Cm(9.0), Cm(3.5)]
+    # Chia tỷ lệ chuẩn cho khổ A4 ngang (Tổng ~ 26.5 cm)
+    widths = (Cm(1.2), Cm(7.5), Cm(3.5), Cm(10.5), Cm(3.8))
     
+    for i, col in enumerate(table.columns):
+        col.width = widths[i]
+        
     hdr = table.rows[0].cells
     headers = ['STT', 'Tiêu đề', 'Người gửi', 'Nguồn / File đính kèm', 'Đề xuất MXH']
     
     for i, h in enumerate(headers):
         hdr[i].text = h
-        # In đậm tiêu đề bảng
+        hdr[i].width = widths[i]
         hdr[i].paragraphs[0].runs[0].bold = True
 
-    # --- ĐỔ DỮ LIỆU VÀO BẢNG ---
+    # --- ĐỔ DỮ LIỆU ---
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
         row_cells[0].text = str(idx)
         row_cells[1].text = str(row.tieu_de)
         row_cells[2].text = str(row.nguoi_gui)
         
+        # Xử lý cắt ngắn Link dài để Word không bị vỡ bảng
         link = str(row.duong_dan).strip()
         if link.lower() == 'nan' or link == "" or link.lower() == 'empty':
             link_hien_thi = "Không có"
         else:
-            link_hien_thi = link
-            
+            if len(link) > 60:
+                link_hien_thi = link[:40] + "... (Xem link tải trực tiếp trên Web)"
+            else:
+                link_hien_thi = link
+                
         row_cells[3].text = f"{row.nguon_tin}\nLink/File: {link_hien_thi}"
         
         mxh = []
         if row.dang_facebook: mxh.append("Facebook")
         if row.dang_zalo: mxh.append("Zalo OA")
         row_cells[4].text = ", ".join(mxh) if mxh else "Đăng Web"
-
-    # Áp dụng lại độ rộng cho tất cả các dòng (Bắt buộc với python-docx)
-    for row in table.rows:
-        for idx, width in enumerate(widths):
-            row.cells[idx].width = width
+        
+        # Ép lại chiều rộng cho từng ô của dòng mới
+        for i, cell in enumerate(row_cells):
+            cell.width = widths[i]
 
     bio = io.BytesIO()
     doc.save(bio)
@@ -83,7 +91,15 @@ def tao_file_word(df, ngay_thang):
 
 def main():
     st.set_page_config(page_title="Hệ thống Quản lý Tin bài", layout="wide")
-    st.markdown('<div style="background-color:#004B87;padding:15px;border-radius:10px;color:white;text-align:center;"><h1>📝 HỆ THỐNG QUẢN LÝ TIN BÀI 4.0</h1></div>', unsafe_allow_html=True)
+    
+    # ĐỔI TIÊU ĐỀ HOÀNH TRÁNG CHO BAN TUYÊN GIÁO
+    st.markdown("""
+        <div style="background-color:#004B87; padding:20px; border-radius:10px; color:white; text-align:center;">
+            <h2 style="margin:0; font-size: 1.8rem; text-transform: uppercase;">Hệ thống quản lý tin bài đăng trang Thông tin điện tử</h2>
+            <h3 style="margin:5px 0 0 0; font-size: 1.3rem; font-weight: normal; color: #FFD700;">Ban Tuyên giáo và Dân vận Tỉnh ủy Tuyên Quang</h3>
+        </div>
+        <br>
+    """, unsafe_allow_html=True)
 
     with st.sidebar:
         st.header("🔐 Dành cho Quản trị")
@@ -131,19 +147,13 @@ def main():
                                 file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
                                 link_chinh = ""
                                 try:
-                                    res_upload = supabase.storage.from_("tin_bai").upload(file_name, f.read())
+                                    supabase.storage.from_("tin_bai").upload(file_name, f.read())
                                     link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
                                 except Exception as e:
-                                    st.error(f"Lỗi khi tải file '{f.name}' lên hệ thống lưu trữ! Chi tiết lỗi: {e}")
+                                    st.error(f"Lỗi tải file lên hệ thống lưu trữ! Chi tiết lỗi: {e}")
                                 
                                 tieu_de_file = f.name.rsplit('.', 1)[0] 
-                                data = {
-                                    "nguoi_gui": nguoi_gui_clean, 
-                                    "tieu_de": str(tieu_de_file).strip(), 
-                                    "nguon_tin": nguon_clean, 
-                                    "duong_dan": str(link_chinh).strip(), 
-                                    "ghi_chu": ghi_chu_clean
-                                }
+                                data = {"nguoi_gui": nguoi_gui_clean, "tieu_de": str(tieu_de_file).strip(), "nguon_tin": nguon_clean, "duong_dan": str(link_chinh).strip(), "ghi_chu": ghi_chu_clean}
                                 supabase.table("dang_ky_tin_bai").insert(data).execute()
                                 count += 1
                             st.success(f"🎉 Đã gửi thành công {count} bài viết mới!")
@@ -177,7 +187,6 @@ def main():
             
             if res_today.data:
                 df_today = pd.DataFrame(res_today.data)
-                
                 df_today['duong_dan'] = df_today['duong_dan'].fillna("").astype(str)
                 df_today.loc[df_today['duong_dan'].str.lower() == 'nan', 'duong_dan'] = ""
 
