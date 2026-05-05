@@ -30,8 +30,8 @@ def tao_file_word(df, ngay_thang):
         row_cells = table.add_row().cells
         row_cells[0].text = str(idx)
         row_cells[1].text = f"{row.tieu_de}\n(Gửi bởi: {row.nguoi_gui})"
-        link_hien_thi = str(row.duong_dan) if row.duong_dan else "Không có file/link"
-        row_cells[2].text = f"{row.nguon_tin}\nLink: {link_hien_thi}"
+        link_hien_thi = str(row.duong_dan) if row.duong_dan else "Không có"
+        row_cells[2].text = f"{row.nguon_tin}\nLink/File: {link_hien_thi}"
         
         mxh = []
         if row.dang_facebook: mxh.append("Facebook")
@@ -55,35 +55,63 @@ def main():
     # TẠO 3 TAB
     tab1, tab2, tab3 = st.tabs(["✍️ Đăng ký tin bài", "📊 Tổng hợp hàng ngày", "📈 Thống kê & Biểu đồ"])
 
-    # --- TAB 1: ĐĂNG KÝ ---
+    # --- TAB 1: ĐĂNG KÝ (DÀNH CHO MỌI NGƯỜI) ---
     with tab1:
         st.subheader("Gửi thông tin bài viết")
+        
         with st.form("form_dang_ky", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                nguoi_gui = st.selectbox("Người gửi:", ["Lê Minh Tiến", "Trần Thị Thảo", "Nguyễn Thị Phương Thảo", "Phạm Thị Nga", "Lãnh đạo Phòng chuyên môn"])
-                tieu_de = st.text_input("Tiêu đề bài viết:")
-            with col2:
-                nguon = st.radio("Nguồn tin:", ["Viết mới", "Đề nghị đăng lại"], horizontal=True)
-                link_ngoai = st.text_input("Đường dẫn (Nếu lấy từ báo khác):")
+            nguoi_gui = st.text_input("Họ và tên người gửi (*Bắt buộc):", placeholder="Nhập họ và tên của đồng chí...")
+            nguon = st.radio("Loại tin bài (Chọn 1 trong 2):", ["Viết mới", "Đề nghị đăng lại (Sưu tầm)"], horizontal=True)
             
-            file_upload = st.file_uploader("Tải lên file bài viết (Word/PDF/Ảnh):", type=["doc", "docx", "pdf", "png", "jpg"])
-            ghi_chu = st.text_area("Ghi chú thêm:")
-            btn_gui = st.form_submit_button("Gửi đăng ký")
+            st.markdown("---")
+            st.markdown("### 🔹 NẾU LÀ TIN VIẾT MỚI:")
+            st.caption("Có thể chọn nhiều file cùng lúc. Tiêu đề bài sẽ tự động lấy theo tên file.")
+            file_uploads = st.file_uploader("Tải lên các file (Word/PDF/Ảnh):", type=["doc", "docx", "pdf", "png", "jpg"], accept_multiple_files=True)
+            
+            st.markdown("### 🔹 NẾU LÀ TIN SƯU TẦM (Đăng lại):")
+            st.caption("Gõ trực tiếp vào bảng dưới. Bấm dấu cộng (+) ở góc dưới bảng để thêm dòng mới nếu gửi nhiều bài.")
+            df_links = pd.DataFrame([{"tieu_de": "", "link": ""}])
+            edited_links = st.data_editor(df_links, num_rows="dynamic", column_config={"tieu_de": "Tiêu đề bài sưu tầm", "link": "Đường dẫn (Link bài gốc)"}, use_container_width=True)
+            
+            st.markdown("---")
+            ghi_chu = st.text_area("Ghi chú chung (Áp dụng cho tất cả các bài gửi trong lần này):")
+            btn_gui = st.form_submit_button("Gửi đăng ký tin bài")
             
             if btn_gui:
-                link_chinh = link_ngoai
-                if file_upload is not None:
-                    file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file_upload.name}"
-                    try:
-                        supabase.storage.from_("tin_bai").upload(file_name, file_upload.read())
-                        link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
-                    except Exception as e:
-                        st.error("Lỗi tải file lên kho lưu trữ.")
-                
-                data = {"nguoi_gui": nguoi_gui, "tieu_de": tieu_de, "nguon_tin": nguon, "duong_dan": link_chinh, "ghi_chu": ghi_chu}
-                supabase.table("dang_ky_tin_bai").insert(data).execute()
-                st.success("Đã gửi bài thành công! Tổng hợp sẽ được xuất lúc 15h00.")
+                if not nguoi_gui.strip():
+                    st.error("Đồng chí vui lòng điền Họ và tên trước khi gửi!")
+                else:
+                    count = 0
+                    if nguon == "Viết mới":
+                        if not file_uploads:
+                            st.error("Đồng chí chọn 'Viết mới' nhưng chưa tải file nào lên!")
+                        else:
+                            for f in file_uploads:
+                                file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
+                                link_chinh = ""
+                                try:
+                                    supabase.storage.from_("tin_bai").upload(file_name, f.read())
+                                    link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
+                                except Exception:
+                                    pass
+                                
+                                # Lấy tên file làm tiêu đề (cắt bỏ đuôi mở rộng)
+                                tieu_de_file = f.name.rsplit('.', 1)[0] 
+                                data = {"nguoi_gui": nguoi_gui, "tieu_de": tieu_de_file, "nguon_tin": nguon, "duong_dan": link_chinh, "ghi_chu": ghi_chu}
+                                supabase.table("dang_ky_tin_bai").insert(data).execute()
+                                count += 1
+                            st.success(f"🎉 Đã gửi thành công {count} bài viết mới! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
+                    
+                    else: # Tin sưu tầm
+                        valid_rows = [row for index, row in edited_links.iterrows() if str(row["tieu_de"]).strip() != ""]
+                        if not valid_rows:
+                            st.error("Đồng chí chọn 'Đăng lại' nhưng chưa điền Tiêu đề nào vào bảng!")
+                        else:
+                            for row in valid_rows:
+                                data = {"nguoi_gui": nguoi_gui, "tieu_de": row["tieu_de"], "nguon_tin": nguon, "duong_dan": row["link"], "ghi_chu": ghi_chu}
+                                supabase.table("dang_ky_tin_bai").insert(data).execute()
+                                count += 1
+                            st.success(f"🎉 Đã gửi thành công {count} bài sưu tầm! Bộ phận tổng hợp sẽ xử lý lúc 15h00.")
 
     # --- TAB 2: TỔNG HỢP TRÌNH DUYỆT (Chỉ Admin thấy nội dung) ---
     with tab2:
@@ -111,19 +139,30 @@ def main():
                     if st.button("Lưu trạng thái MXH"):
                         for _, row in edited_df.iterrows():
                             supabase.table("dang_ky_tin_bai").update({"dang_facebook": row["dang_facebook"], "dang_zalo": row["dang_zalo"]}).eq("id", row["id"]).execute()
-                        st.success("Đã lưu!")
+                        st.success("Đã lưu đánh dấu Mạng xã hội!")
                 with c_xuat:
                     word_data = tao_file_word(edited_df, today_str)
                     st.download_button("📥 Xuất file Word trình duyệt", data=word_data, file_name=f"TinBai_{datetime.now().strftime('%Y%m%d')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             else:
                 st.info("Hôm nay chưa có ai gửi bài.")
+
+            # Nút XÓA SẠCH DỮ LIỆU
+            st.divider()
+            st.warning("⚠️ Khu vực dọn dẹp dữ liệu")
+            if st.button("🗑️ Xóa sạch toàn bộ tin bài (Reset dữ liệu test)"):
+                try:
+                    # Lệnh này sẽ xóa mọi dòng có id khác 0 (nghĩa là xóa tất cả)
+                    supabase.table("dang_ky_tin_bai").delete().neq("id", 0).execute()
+                    st.success("Đã dọn dẹp sạch sẽ toàn bộ dữ liệu test!")
+                    st.rerun() # Refresh lại trang ngay lập tức
+                except Exception as e:
+                    st.error(f"Có lỗi khi xóa: {e}")
         else:
-            st.warning("Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để xem nội dung này.")
+            st.warning("Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để xem và thao tác phần này.")
 
     # --- TAB 3: THỐNG KÊ & BIỂU ĐỒ ---
     with tab3:
         st.subheader("Báo cáo số lượng tin bài")
-        # Lấy toàn bộ dữ liệu để thống kê
         res_all = supabase.table("dang_ky_tin_bai").select("*").execute()
         
         if res_all.data:
@@ -133,7 +172,6 @@ def main():
             df_all['Quý'] = df_all['ngay_dang_ky'].dt.quarter
             df_all['Năm'] = df_all['ngay_dang_ky'].dt.year
 
-            # Tạo bộ lọc thời gian
             f_col1, f_col2, f_col3 = st.columns(3)
             with f_col1:
                 ds_nam = df_all['Năm'].unique().tolist()
@@ -143,24 +181,21 @@ def main():
             with f_col3:
                 chon_thang = st.selectbox("Tháng:", ["Tất cả"] + list(range(1, 13)))
 
-            # Lọc dữ liệu
             df_loc = df_all[df_all['Năm'] == chon_nam]
             if chon_quy != "Tất cả": df_loc = df_loc[df_loc['Quý'] == chon_quy]
             if chon_thang != "Tất cả": df_loc = df_loc[df_loc['Tháng'] == chon_thang]
 
             if not df_loc.empty:
-                # Các ô chỉ số tổng quan
                 st.write("---")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Tổng số bài viết", len(df_loc))
+                m1.metric("Tổng số bài", len(df_loc))
                 m2.metric("Bài tự viết mới", len(df_loc[df_loc['nguon_tin'] == 'Viết mới']))
                 m3.metric("Bài đề nghị đăng lại", len(df_loc[df_loc['nguon_tin'] == 'Đề nghị đăng lại']))
 
-                # Vẽ biểu đồ tương tác
-                st.markdown("##### 🏆 Năng suất cán bộ (Kiểm tra chỉ tiêu)")
+                st.markdown("##### 🏆 Thống kê năng suất cán bộ")
                 df_bieu_do = df_loc.groupby(['nguoi_gui', 'nguon_tin']).size().reset_index(name='Số lượng')
                 fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', 
-                             title="Thống kê tin bài theo người gửi", barmode='group',
+                             title="Theo dõi chỉ tiêu tin bài", barmode='group',
                              labels={'nguoi_gui': 'Cán bộ', 'Số lượng': 'Số bài'})
                 st.plotly_chart(fig, use_container_width=True)
             else:
