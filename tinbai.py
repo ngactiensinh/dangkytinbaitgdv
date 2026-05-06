@@ -14,7 +14,7 @@ import re
 # 1. KẾT NỐI
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
-ADMIN_PASS = st.secrets.get("ADMIN_PASS", "tuyenquang2026")
+ADMIN_PASS = st.secrets.get("ADMIN_PASS", "141983")
 supabase = create_client(URL, KEY)
 
 # Hàm tạo file Word báo cáo (CHUẨN 6 CỘT THEO ẢNH, ẨN LINK)
