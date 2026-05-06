@@ -8,6 +8,8 @@ from docx.shared import Cm
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import plotly.express as px
+import unicodedata
+import re
 
 # 1. KẾT NỐI
 URL = st.secrets["SUPABASE_URL"]
@@ -79,7 +81,15 @@ def tao_file_word(df, ngay_thang):
     bio = io.BytesIO()
     doc.save(bio)
     return bio.getvalue()
-
+def lam_sach_ten_file(ten_file):
+    # 1. Bỏ dấu tiếng Việt
+    ten_file = unicodedata.normalize('NFKD', ten_file).encode('ASCII', 'ignore').decode('utf-8')
+    # 2. Thay khoảng trắng bằng dấu gạch dưới
+    ten_file = ten_file.replace(' ', '_')
+    # 3. Xóa sạch các ký tự đặc biệt (chỉ giữ lại chữ, số, dấu chấm, gạch dưới, gạch ngang)
+    ten_file = re.sub(r'[^\w\.\-]', '', ten_file)
+    return ten_file
+    
 def main():
     st.set_page_config(page_title="Hệ thống Quản lý Tin bài", layout="wide")
     
@@ -137,12 +147,21 @@ def main():
                             danh_sach_link = []
                             for f in file_uploads:
                                 file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.name}"
+                                # --- ĐOẠN CODE ĐÃ LẮP MÀNG LỌC ---
+                                # 1. Chạy tên file qua hàm làm sạch trước khi upload
+                                file_name_sach = lam_sach_ten_file(file_name)
+                                
                                 try:
-                                    supabase.storage.from_("tin_bai").upload(file_name, f.read())
-                                    link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name)
+                                    # 2. Upload bằng cái tên đã làm sạch (file_name_sach)
+                                    supabase.storage.from_("tin_bai").upload(file_name_sach, f.read())
+                                    
+                                    # 3. Lấy link cũng phải dùng tên đã làm sạch
+                                    link_chinh = supabase.storage.from_("tin_bai").get_public_url(file_name_sach)
+                                    
                                     danh_sach_link.append(link_chinh)
                                 except Exception as e:
                                     st.error(f"Lỗi tải file {f.name}: {e}")
+                                # ---------------------------------
                             
                             # Gộp tất cả link vào chung 1 bài viết
                             link_tong_hop = "\n".join(danh_sach_link)
