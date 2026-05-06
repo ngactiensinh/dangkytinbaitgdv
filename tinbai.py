@@ -81,6 +81,7 @@ def tao_file_word(df, ngay_thang):
     bio = io.BytesIO()
     doc.save(bio)
     return bio.getvalue()
+
 def lam_sach_ten_file(ten_file):
     # 1. Bỏ dấu tiếng Việt
     ten_file = unicodedata.normalize('NFKD', ten_file).encode('ASCII', 'ignore').decode('utf-8')
@@ -264,8 +265,13 @@ def main():
             if not df_loc.empty:
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Tổng số bài", len(df_loc))
-                m2.metric("Bài tự viết", len(df_loc[df_loc['nguon_tin'] == 'Viết mới']))
-                m3.metric("Bài sưu tầm", len(df_loc[df_loc['nguon_tin'] == 'Đề nghị đăng lại']))
+                
+                # 🌟 ĐÃ SỬA LỖI ĐẾM Ở ĐÂY: Dùng str.contains để bắt chéo từ khóa linh hoạt
+                so_bai_tu_viet = len(df_loc[df_loc['nguon_tin'].astype(str).str.contains('Viết mới|tự viết', case=False, na=False)])
+                so_bai_suu_tam = len(df_loc[df_loc['nguon_tin'].astype(str).str.contains('Sưu tầm|đăng lại', case=False, na=False)])
+                
+                m2.metric("Bài tự viết", so_bai_tu_viet)
+                m3.metric("Bài sưu tầm", so_bai_suu_tam)
 
                 df_bieu_do = df_loc.groupby(['nguoi_gui', 'nguon_tin']).size().reset_index(name='Số lượng')
                 fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', barmode='group')
