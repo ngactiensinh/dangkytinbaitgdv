@@ -249,37 +249,95 @@ def main():
         else:
             st.warning("Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để xem và thao tác phần này.")
 
-    # --- TAB 3: THỐNG KÊ ---
+   # --- TAB 3: THỐNG KÊ ---
     with tab3:
         st.subheader("Báo cáo số lượng tin bài")
         res_all = supabase.table("dang_ky_tin_bai").select("*").execute()
         
         if res_all.data:
             df_all = pd.DataFrame(res_all.data)
-            df_all['ngay_dang_ky'] = pd.to_datetime(df_all['ngay_dang_ky'])
+            # Ép kiểu ngày tháng cho chuẩn để tránh lỗi
+            df_all['ngay_dang_ky'] = pd.to_datetime(df_all['ngay_dang_ky'], errors='coerce')
+            df_all = df_all.dropna(subset=['ngay_dang_ky']) # Bỏ qua các dòng bị lỗi ngày
             df_all['Năm'] = df_all['ngay_dang_ky'].dt.year
 
-            chon_nam = st.selectbox("Năm:", df_all['Năm'].unique().tolist())
-            df_loc = df_all[df_all['Năm'] == chon_nam]
+            # 🌟 BỘ LỌC LIÊN HOÀN 3 TẦNG 🌟
+            col_nam, col_kieu_loc, col_chi_tiet = st.columns(3)
 
+            with col_nam:
+                # Tự động lấy danh sách các năm có trong DB, xếp từ mới nhất
+                danh_sach_nam = sorted(df_all['Năm'].unique().tolist(), reverse=True)
+                chon_nam = st.selectbox("📅 Chọn Năm:", danh_sach_nam)
+
+            # Lấy trước dữ liệu của năm đã chọn
+            df_nam = df_all[df_all['Năm'] == chon_nam].copy()
+
+            with col_kieu_loc:
+                kieu_loc = st.selectbox("🔍 Lọc theo:", ["Cả năm", "Theo Quý", "Theo Tháng", "Theo Tuần", "Theo Ngày"])
+
+            with col_chi_tiet:
+                df_loc = df_nam.copy() # Mặc định ban đầu là lấy cả năm
+                
+                if kieu_loc == "Theo Quý":
+                    df_nam['Quý'] = df_nam['ngay_dang_ky'].dt.quarter
+                    quy_list = sorted(df_nam['Quý'].unique().tolist())
+                    if quy_list:
+                        chon_quy = st.selectbox("📌 Chọn Quý:", [f"Quý {q}" for q in quy_list])
+                        q_val = int(chon_quy.split(" ")[1])
+                        df_loc = df_nam[df_nam['Quý'] == q_val]
+                        
+                elif kieu_loc == "Theo Tháng":
+                    df_nam['Tháng'] = df_nam['ngay_dang_ky'].dt.month
+                    thang_list = sorted(df_nam['Tháng'].unique().tolist())
+                    if thang_list:
+                        chon_thang = st.selectbox("📌 Chọn Tháng:", [f"Tháng {t}" for t in thang_list])
+                        t_val = int(chon_thang.split(" ")[1])
+                        df_loc = df_nam[df_nam['Tháng'] == t_val]
+                        
+                elif kieu_loc == "Theo Tuần":
+                    df_nam['Tuần'] = df_nam['ngay_dang_ky'].dt.isocalendar().week
+                    tuan_list = sorted(df_nam['Tuần'].unique().tolist())
+                    if tuan_list:
+                        chon_tuan = st.selectbox("📌 Chọn Tuần:", [f"Tuần thứ {t}" for t in tuan_list])
+                        t_val = int(chon_tuan.split(" ")[2])
+                        df_loc = df_nam[df_nam['Tuần'] == t_val]
+                        
+                elif kieu_loc == "Theo Ngày":
+                    ngay_list = sorted(df_nam['ngay_dang_ky'].dt.date.unique().tolist(), reverse=True)
+                    if ngay_list:
+                        # Format hiển thị ngày theo kiểu VN cho đẹp
+                        chon_ngay = st.selectbox("📌 Chọn Ngày:", ngay_list, format_func=lambda x: x.strftime('%d/%m/%Y'))
+                        df_loc = df_nam[df_nam['ngay_dang_ky'].dt.date == chon_ngay]
+                        
+                else:
+                    # Nếu chọn "Cả năm" thì hiện cái dòng này cho đỡ trống
+                    st.info(f"Đang hiển thị toàn bộ dữ liệu năm {chon_nam}")
+
+            st.markdown("---")
+
+            # --- HIỂN THỊ SỐ LIỆU ĐÃ LỌC ---
             if not df_loc.empty:
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Tổng số bài", len(df_loc))
                 
-                # 🌟 ĐÃ SỬA LỖI ĐẾM Ở ĐÂY: Dùng str.contains để bắt chéo từ khóa linh hoạt
+                # Vẫn giữ nguyên công thức "Bắt từ khóa" xịn sò lúc nãy
                 so_bai_tu_viet = len(df_loc[df_loc['nguon_tin'].astype(str).str.contains('Viết mới|tự viết', case=False, na=False)])
                 so_bai_suu_tam = len(df_loc[df_loc['nguon_tin'].astype(str).str.contains('Sưu tầm|đăng lại', case=False, na=False)])
                 
                 m2.metric("Bài tự viết", so_bai_tu_viet)
                 m3.metric("Bài sưu tầm", so_bai_suu_tam)
 
+                # Vẽ biểu đồ kèm hiện số liệu nổi trên cột
                 df_bieu_do = df_loc.groupby(['nguoi_gui', 'nguon_tin']).size().reset_index(name='Số lượng')
-                fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', barmode='group')
+                fig = px.bar(df_bieu_do, x='nguoi_gui', y='Số lượng', color='nguon_tin', barmode='group', text='Số lượng')
+                fig.update_traces(textposition='outside')
+                fig.update_layout(title="Biểu đồ phân bổ Tin bài theo Cán bộ", xaxis_title="Người gửi", yaxis_title="Số lượng")
+                
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("Không có dữ liệu.")
+                st.warning("Không có bài viết nào được đăng ký trong khoảng thời gian này!")
         else:
-            st.info("Chưa có dữ liệu.")
+            st.info("Hệ thống chưa có dữ liệu tin bài.")
 
 if __name__ == "__main__":
     main()
