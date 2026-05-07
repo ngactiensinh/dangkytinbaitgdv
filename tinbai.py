@@ -17,6 +17,12 @@ KEY = st.secrets["SUPABASE_KEY"]
 ADMIN_PASS = st.secrets.get("ADMIN_PASS", "141983")
 supabase = create_client(URL, KEY)
 
+# --- GẮN CHIP THEO DÕI TRUY CẬP ---
+try:
+    supabase.table("thong_ke_truy_cap").insert({"ten_app": "Đăng ký Tin bài"}).execute()
+except:
+    pass
+    
 # Hàm tạo file Word báo cáo (CHUẨN 6 CỘT THEO ẢNH, ẨN LINK)
 def tao_file_word(df, ngay_thang):
     doc = Document()
