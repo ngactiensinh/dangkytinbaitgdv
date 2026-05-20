@@ -468,6 +468,12 @@ def main():
 
             st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
+            # Khởi tạo các biến để tránh NameError
+            tieu_de_viet_moi = ""
+            file_uploads = []
+            tieu_de_suu_tam = ""
+            link_suu_tam = ""
+
             if la_viet_moi:
                 st.markdown("**📄 Thông tin bài viết mới**")
                 tieu_de_viet_moi = st.text_input(
@@ -480,16 +486,14 @@ def main():
                     accept_multiple_files=True,
                 )
             else:
-                st.markdown("**🔗 Danh sách bài sưu tầm** *(nhấn + để thêm dòng)*")
-                df_links  = pd.DataFrame([{"tieu_de": "", "link": ""}])
-                edited_links = st.data_editor(
-                    df_links,
-                    num_rows="dynamic",
-                    column_config={
-                        "tieu_de": st.column_config.TextColumn("Tiêu đề bài sưu tầm"),
-                        "link":    st.column_config.TextColumn("Đường dẫn (URL bài gốc)"),
-                    },
-                    use_container_width=True,
+                st.markdown("**🔗 Thông tin bài sưu tầm / đăng lại**")
+                tieu_de_suu_tam = st.text_input(
+                    "Tiêu đề bài sưu tầm *", 
+                    placeholder="Nhập tiêu đề bài viết..."
+                )
+                link_suu_tam = st.text_input(
+                    "Đường dẫn (URL bài gốc) *", 
+                    placeholder="Dán link bài gốc vào đây (VD: https://baotuyenquang.com.vn/...)"
                 )
 
             ghi_chu = st.text_area("💬 Ghi chú thêm:", placeholder="Không bắt buộc…")
@@ -502,9 +506,10 @@ def main():
                     la_viet_moi = la_viet_moi,
                     nguon_label = "Viết mới" if la_viet_moi else "Đề nghị đăng lại (Sưu tầm)",
                     ghi_chu     = ghi_chu,
-                    tieu_de_viet_moi = tieu_de_viet_moi if la_viet_moi else "",
-                    file_uploads     = file_uploads     if la_viet_moi else [],
-                    edited_links     = edited_links     if not la_viet_moi else pd.DataFrame(),
+                    tieu_de_viet_moi = tieu_de_viet_moi,
+                    file_uploads     = file_uploads,
+                    tieu_de_suu_tam  = tieu_de_suu_tam,
+                    link_suu_tam     = link_suu_tam
                 )
 
     # ══════════════════════════════════════════
@@ -674,7 +679,8 @@ def main():
 # 6. XỬ LÝ GỬI ĐĂNG KÝ (tách ra hàm riêng)
 # ─────────────────────────────────────────────
 def _xu_ly_gui(nguoi_gui, la_viet_moi, nguon_label, ghi_chu,
-               tieu_de_viet_moi, file_uploads, edited_links):
+               tieu_de_viet_moi, file_uploads, tieu_de_suu_tam, link_suu_tam):
+    
     if not nguoi_gui.strip():
         st.error("⛔ Đồng chí vui lòng điền Họ và tên trước khi gửi!")
         return
@@ -713,25 +719,24 @@ def _xu_ly_gui(nguoi_gui, la_viet_moi, nguon_label, ghi_chu,
             st.success(f"🎉 Đã gửi thành công 1 bài viết mới (kèm {len(file_uploads)} file đính kèm)!")
 
     else:  # Sưu tầm
-        count = 0
-        for _, row in edited_links.iterrows():
-            tieu_de = str(row.get("tieu_de", "")).strip()
-            link    = str(row.get("link", "")).strip()
-            if tieu_de and tieu_de.lower() != "nan":
-                supabase.table("dang_ky_tin_bai").insert({
-                    "nguoi_gui": nguoi_gui_clean,
-                    "tieu_de":   tieu_de,
-                    "nguon_tin": nguon_label,
-                    "duong_dan": "" if link.lower() == "nan" else link,
-                    "ghi_chu":   ghi_chu_clean,
-                }).execute()
-                count += 1
+        if not tieu_de_suu_tam.strip():
+            st.error("⛔ Vui lòng nhập tiêu đề bài sưu tầm!")
+            return
+        if not link_suu_tam.strip():
+            st.error("⛔ Vui lòng nhập đường dẫn bài sưu tầm!")
+            return
 
-        if count > 0:
-            st.success(f"🎉 Đã gửi thành công **{count}** bài sưu tầm!")
-        else:
-            st.error("⛔ Vui lòng điền ít nhất một tiêu đề bài sưu tầm hợp lệ!")
-
+        try:
+            supabase.table("dang_ky_tin_bai").insert({
+                "nguoi_gui": nguoi_gui_clean,
+                "tieu_de":   tieu_de_suu_tam.strip(),
+                "nguon_tin": nguon_label,
+                "duong_dan": link_suu_tam.strip(),
+                "ghi_chu":   ghi_chu_clean,
+            }).execute()
+            st.success("🎉 Đã gửi đăng ký bài sưu tầm thành công!")
+        except Exception as e:
+            st.error(f"Lỗi khi gửi bài sưu tầm: {e}")
 
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
