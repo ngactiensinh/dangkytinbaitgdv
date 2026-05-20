@@ -255,17 +255,13 @@ def them_hyperlink_vao_cell(cell, text: str, url: str):
     paragraph = cell.paragraphs[0]
     paragraph.clear()
 
-    # Tạo relationship hyperlink trong phần XML
     part = paragraph.part
     r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
 
-    # Build XML
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("r:id"), r_id)
 
     new_run = OxmlElement("w:r")
-
-    # Định dạng: màu xanh, gạch chân
     rPr = OxmlElement("w:rPr")
     rStyle = OxmlElement("w:rStyle")
     rStyle.set(qn("w:val"), "Hyperlink")
@@ -284,21 +280,13 @@ def them_hyperlink_vao_cell(cell, text: str, url: str):
 # 4. TẠO FILE WORD
 # ─────────────────────────────────────────────
 def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
-    """
-    Xuất bảng tổng hợp tin bài ra file Word.
-    - Bài đăng lại (sưu tầm): cột Nguồn tự động chèn hyperlink đến đường dẫn gốc.
-    - Bài viết mới: hiển thị tên nguồn / tên file, không chèn link.
-    """
     doc = Document()
-
-    # Khổ giấy ngang A4
     section = doc.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width, section.page_height = section.page_height, section.page_width
     for attr in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
         setattr(section, attr, Cm(1.5))
 
-    # ── Tiêu đề ──
     heading = doc.add_heading("BẢNG TỔNG HỢP ĐĂNG KÝ TIN BÀI", 1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in heading.runs:
@@ -310,9 +298,8 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
     p_ngay.runs[0].font.italic = True
     p_ngay.runs[0].font.color.rgb = RGBColor(80, 80, 80)
 
-    doc.add_paragraph()  # khoảng cách
+    doc.add_paragraph()
 
-    # ── Bảng 6 cột ──
     headers  = ["STT", "Tiêu đề", "Người gửi", "Nguồn / File đính kèm", "Đề xuất MXH", "Người đăng"]
     col_widths = (Cm(1.2), Cm(8.5), Cm(3.5), Cm(5.0), Cm(4.0), Cm(4.3))
 
@@ -323,7 +310,6 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
     for i, col in enumerate(table.columns):
         col.width = col_widths[i]
 
-    # Header row – nền xanh đậm, chữ trắng
     hdr_row = table.rows[0]
     hdr_row.height = Cm(0.9)
     for i, (cell, text) in enumerate(zip(hdr_row.cells, headers)):
@@ -333,7 +319,6 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
         run.bold = True
         run.font.color.rgb = RGBColor(255, 255, 255)
         run.font.size = Pt(11)
-        # Tô nền xanh
         tc_pr = cell._tc.get_or_add_tcPr()
         shd = OxmlElement("w:shd")
         shd.set(qn("w:val"), "clear")
@@ -342,7 +327,6 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
         tc_pr.append(shd)
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Dữ liệu
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
 
@@ -352,37 +336,29 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
         row_cells[1].text = str(row.tieu_de)
         row_cells[2].text = str(row.nguoi_gui)
 
-        # ── Cột Nguồn – tự động chèn hyperlink nếu là bài sưu tầm ──
         nguon_str  = str(row.nguon_tin) if pd.notna(row.nguon_tin) else ""
         duong_dan  = str(row.duong_dan) if pd.notna(getattr(row, "duong_dan", None)) else ""
         is_suu_tam = "sưu tầm" in nguon_str.lower() or "đăng lại" in nguon_str.lower()
 
         if is_suu_tam and duong_dan and duong_dan.lower() not in ("", "nan"):
-            # Nếu nhiều link (bài viết mới nhiều file) thì lấy link đầu tiên
             first_link = duong_dan.splitlines()[0].strip()
             hien_thi   = nguon_str if nguon_str and nguon_str != "nan" else first_link
             them_hyperlink_vao_cell(row_cells[3], hien_thi, first_link)
         else:
-            # Bài viết mới – chỉ hiện tên nguồn
             row_cells[3].text = nguon_str
 
-        # ── Đề xuất MXH ──
         mxh = ["Đăng Web"]
         if getattr(row, "dang_facebook", False): mxh.append("Facebook")
         if getattr(row, "dang_zalo",    False): mxh.append("Zalo OA")
         row_cells[4].text = ", ".join(mxh)
-
-        # ── Người đăng ──
         row_cells[5].text = str(row.nguoi_dang) if pd.notna(getattr(row, "nguoi_dang", None)) else ""
 
-        # Ép chiều rộng & căn font
         for i, cell in enumerate(row_cells):
             cell.width = col_widths[i]
             for para in cell.paragraphs:
                 for run in para.runs:
                     run.font.size = Pt(10)
 
-        # Tô nền xen kẽ dòng cho dễ đọc
         if idx % 2 == 0:
             for cell in row_cells:
                 tc_pr = cell._tc.get_or_add_tcPr()
@@ -451,6 +427,15 @@ def main():
     # ══════════════════════════════════════════
     with tab1:
         st.subheader("Gửi thông tin đăng ký bài viết")
+        
+        # CHÚ Ý: CHUYỂN NÚT RADIO RA KHỎI FORM ĐỂ UI UPDATE NGAY LẬP TỨC
+        nguon = st.radio(
+            "📂 Loại tin bài:",
+            ["✏️ Viết mới", "🔗 Đề nghị đăng lại (Sưu tầm)"],
+            horizontal=True,
+        )
+        la_viet_moi = "Viết mới" in nguon
+
         st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
         with st.form("form_dang_ky", clear_on_submit=True):
@@ -459,16 +444,7 @@ def main():
                 placeholder="Nhập họ và tên đầy đủ của đồng chí…"
             )
 
-            nguon = st.radio(
-                "📂 Loại tin bài:",
-                ["✏️ Viết mới", "🔗 Đề nghị đăng lại (Sưu tầm)"],
-                horizontal=True,
-            )
-            la_viet_moi = "Viết mới" in nguon
-
-            st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-
-            # Khởi tạo các biến để tránh NameError
+            # Khởi tạo các biến để tránh NameError khi lưu
             tieu_de_viet_moi = ""
             file_uploads = []
             tieu_de_suu_tam = ""
