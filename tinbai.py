@@ -14,21 +14,34 @@ import unicodedata
 import re
 
 # ─────────────────────────────────────────────
-# 1. KẾT NỐI SUPABASE
+# 1. CẤU HÌNH TRANG (BẮT BUỘC PHẢI Ở ĐẦU TIÊN)
 # ─────────────────────────────────────────────
-URL       = st.secrets["SUPABASE_URL"]
-KEY       = st.secrets["SUPABASE_KEY"]
-ADMIN_PASS = st.secrets.get("ADMIN_PASS", "141983")
-supabase  = create_client(URL, KEY)
+st.set_page_config(
+    page_title="Hệ thống Quản lý Tin bài – Ban Tuyên giáo",
+    page_icon="📰",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─────────────────────────────────────────────
+# 2. KẾT NỐI SUPABASE
+# ─────────────────────────────────────────────
+try:
+    URL       = st.secrets["SUPABASE_URL"]
+    KEY       = st.secrets["SUPABASE_KEY"]
+    ADMIN_PASS = st.secrets.get("ADMIN_PASS", "141983")
+    supabase  = create_client(URL, KEY)
+except Exception as e:
+    st.error("⚠️ Lỗi kết nối cơ sở dữ liệu. Sếp vui lòng kiểm tra lại cấu hình Secrets trên Streamlit nhé!")
+    st.stop()
 
 try:
     supabase.table("thong_ke_truy_cap").insert({"ten_app": "Đăng ký Tin bài"}).execute()
 except Exception:
     pass
 
-
 # ─────────────────────────────────────────────
-# 2. CSS – PHONG CÁCH CHÍNH TRỊ / HIỆN ĐẠI
+# 3. CSS – PHONG CÁCH CHÍNH TRỊ / HIỆN ĐẠI
 # ─────────────────────────────────────────────
 CUSTOM_CSS = """
 <style>
@@ -231,54 +244,39 @@ CUSTOM_CSS = """
 </style>
 """
 
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 3. TIỆN ÍCH
+# 4. CÁC HÀM TIỆN ÍCH
 # ─────────────────────────────────────────────
 def lam_sach_ten_file(ten_file: str) -> str:
-    """Loại bỏ dấu và ký tự đặc biệt khỏi tên file trước khi upload."""
     ten_file = unicodedata.normalize("NFKD", ten_file).encode("ASCII", "ignore").decode("utf-8")
     ten_file = ten_file.replace(" ", "_")
     ten_file = re.sub(r"[^\w.\-]", "", ten_file)
     return ten_file
 
-
 def them_hyperlink_vao_cell(cell, text: str, url: str):
-    """
-    Chèn văn bản có hyperlink vào một ô bảng Word.
-    Nếu url rỗng thì chỉ in text thuần.
-    """
     if not url or url.strip() in ("", "nan"):
         cell.text = text
         return
-
     paragraph = cell.paragraphs[0]
     paragraph.clear()
-
     part = paragraph.part
     r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
-
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("r:id"), r_id)
-
     new_run = OxmlElement("w:r")
     rPr = OxmlElement("w:rPr")
     rStyle = OxmlElement("w:rStyle")
     rStyle.set(qn("w:val"), "Hyperlink")
     rPr.append(rStyle)
     new_run.append(rPr)
-
     t = OxmlElement("w:t")
     t.text = text if text and text != "nan" else url
     new_run.append(t)
-
     hyperlink.append(new_run)
     paragraph._p.append(hyperlink)
 
-
-# ─────────────────────────────────────────────
-# 4. TẠO FILE WORD
-# ─────────────────────────────────────────────
 def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
     doc = Document()
     section = doc.sections[0]
@@ -329,10 +327,8 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
 
     for idx, row in enumerate(df.itertuples(), 1):
         row_cells = table.add_row().cells
-
         row_cells[0].text = str(idx)
         row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
         row_cells[1].text = str(row.tieu_de)
         row_cells[2].text = str(row.nguoi_gui)
 
@@ -372,130 +368,171 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
     doc.save(bio)
     return bio.getvalue()
 
+def _xu_ly_gui(nguoi_gui, la_viet_moi, nguon_label, ghi_chu, tieu_de_viet_moi, file_uploads, tieu_de_suu_tam, link_suu_tam):
+    if not nguoi_gui.strip():
+        st.error("⛔ Đồng chí vui lòng điền Họ và tên trước khi gửi!")
+        return
+
+    nguoi_gui_clean = nguoi_gui.strip()
+    ghi_chu_clean   = ghi_chu.strip() if ghi_chu else ""
+
+    if la_viet_moi:
+        if not tieu_de_viet_moi.strip():
+            st.error("⛔ Vui lòng nhập Tiêu đề bài viết!")
+            return
+        if not file_uploads:
+            st.error("⛔ Đồng chí chọn 'Viết mới' nhưng chưa tải file nào lên!")
+            return
+
+        links = []
+        for f in file_uploads:
+            ts        = datetime.now().strftime("%Y%m%d%H%M%S")
+            raw_name  = f"{ts}_{f.name}"
+            safe_name = lam_sach_ten_file(raw_name)
+            try:
+                supabase.storage.from_("tin_bai").upload(safe_name, f.read())
+                url = supabase.storage.from_("tin_bai").get_public_url(safe_name)
+                links.append(url)
+            except Exception as e:
+                st.error(f"Lỗi tải file {f.name}: {e}")
+
+        if links:
+            supabase.table("dang_ky_tin_bai").insert({
+                "nguoi_gui": nguoi_gui_clean,
+                "tieu_de":   tieu_de_viet_moi.strip(),
+                "nguon_tin": nguon_label,
+                "duong_dan": "\n".join(links),
+                "ghi_chu":   ghi_chu_clean,
+            }).execute()
+            st.success(f"🎉 Đã gửi thành công 1 bài viết mới (kèm {len(file_uploads)} file đính kèm)!")
+
+    else:
+        if not tieu_de_suu_tam.strip():
+            st.error("⛔ Vui lòng nhập tiêu đề bài sưu tầm!")
+            return
+        if not link_suu_tam.strip():
+            st.error("⛔ Vui lòng nhập đường dẫn bài sưu tầm!")
+            return
+
+        try:
+            supabase.table("dang_ky_tin_bai").insert({
+                "nguoi_gui": nguoi_gui_clean,
+                "tieu_de":   tieu_de_suu_tam.strip(),
+                "nguon_tin": nguon_label,
+                "duong_dan": link_suu_tam.strip(),
+                "ghi_chu":   ghi_chu_clean,
+            }).execute()
+            st.success("🎉 Đã gửi đăng ký bài sưu tầm thành công!")
+        except Exception as e:
+            st.error(f"Lỗi khi gửi bài sưu tầm: {e}")
 
 # ─────────────────────────────────────────────
-# 5. GIAO DIỆN CHÍNH
+# 5. HEADER & LAYOUT CHÍNH
 # ─────────────────────────────────────────────
-def main():
-    st.set_page_config(
-        page_title="Hệ thống Quản lý Tin bài – Ban Tuyên giáo",
-        page_icon="📰",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
+st.markdown("""
+    <div class="header-banner">
+        <span class="star">★ ★ ★ ★ ★</span>
+        <h1>Hệ thống quản lý tin bài đăng trang Thông tin điện tử</h1>
+        <h2>Ban Tuyên giáo và Dân vận Tỉnh ủy Tuyên Quang</h2>
+    </div>
+""", unsafe_allow_html=True)
 
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+with st.sidebar:
+    st.markdown("### 🔐 Quản trị hệ thống")
+    mat_khau = st.text_input("Mật khẩu quản trị:", type="password", placeholder="Nhập mật khẩu…")
+    is_admin = mat_khau == ADMIN_PASS
+    if is_admin:
+        st.success("✔ Đã xác thực quản trị viên")
+    elif mat_khau:
+        st.error("✘ Mật khẩu không đúng")
 
-    # Header banner
+    st.markdown("---")
     st.markdown("""
-        <div class="header-banner">
-            <span class="star">★ ★ ★ ★ ★</span>
-            <h1>Hệ thống quản lý tin bài đăng trang Thông tin điện tử</h1>
-            <h2>Ban Tuyên giáo và Dân vận Tỉnh ủy Tuyên Quang</h2>
+        <div style='font-size:0.78rem; color:#a0b4cc; line-height:1.7;'>
+            <b style='color:#FFD700'>📌 Hướng dẫn nhanh:</b><br>
+            • Tab 1: Cán bộ đăng ký tin bài<br>
+            • Tab 2: Quản trị duyệt & xuất Word<br>
+            • Tab 3: Thống kê biểu đồ<br>
         </div>
     """, unsafe_allow_html=True)
 
-    # ── Sidebar ──
-    with st.sidebar:
-        st.markdown("### 🔐 Quản trị hệ thống")
-        mat_khau = st.text_input("Mật khẩu quản trị:", type="password", placeholder="Nhập mật khẩu…")
-        is_admin = mat_khau == ADMIN_PASS
-        if is_admin:
-            st.success("✔ Đã xác thực quản trị viên")
-        elif mat_khau:
-            st.error("✘ Mật khẩu không đúng")
+tab1, tab2, tab3 = st.tabs([
+    "✍️  Đăng ký tin bài",
+    "📋  Tổng hợp & Duyệt",
+    "📊  Thống kê & Biểu đồ",
+])
 
-        st.markdown("---")
-        st.markdown("""
-            <div style='font-size:0.78rem; color:#a0b4cc; line-height:1.7;'>
-                <b style='color:#FFD700'>📌 Hướng dẫn nhanh:</b><br>
-                • Tab 1: Cán bộ đăng ký tin bài<br>
-                • Tab 2: Quản trị duyệt & xuất Word<br>
-                • Tab 3: Thống kê biểu đồ<br>
-            </div>
-        """, unsafe_allow_html=True)
+# ══════════════════════════════════════════
+# TAB 1 – ĐĂNG KÝ TIN BÀI
+# ══════════════════════════════════════════
+with tab1:
+    st.subheader("Gửi thông tin đăng ký bài viết")
+    
+    nguon = st.radio(
+        "📂 Loại tin bài:",
+        ["✏️ Viết mới", "🔗 Đề nghị đăng lại (Sưu tầm)"],
+        horizontal=True,
+    )
+    la_viet_moi = "Viết mới" in nguon
 
-    # ── Tabs ──
-    tab1, tab2, tab3 = st.tabs([
-        "✍️  Đăng ký tin bài",
-        "📋  Tổng hợp & Duyệt",
-        "📊  Thống kê & Biểu đồ",
-    ])
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-    # ══════════════════════════════════════════
-    # TAB 1 – ĐĂNG KÝ TIN BÀI
-    # ══════════════════════════════════════════
-    with tab1:
-        st.subheader("Gửi thông tin đăng ký bài viết")
-        
-        # CHÚ Ý: CHUYỂN NÚT RADIO RA KHỎI FORM ĐỂ UI UPDATE NGAY LẬP TỨC
-        nguon = st.radio(
-            "📂 Loại tin bài:",
-            ["✏️ Viết mới", "🔗 Đề nghị đăng lại (Sưu tầm)"],
-            horizontal=True,
+    with st.form("form_dang_ky", clear_on_submit=True):
+        nguoi_gui = st.text_input(
+            "👤 Họ và tên người gửi *",
+            placeholder="Nhập họ và tên đầy đủ của đồng chí…"
         )
-        la_viet_moi = "Viết mới" in nguon
 
-        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        tieu_de_viet_moi = ""
+        file_uploads = []
+        tieu_de_suu_tam = ""
+        link_suu_tam = ""
 
-        with st.form("form_dang_ky", clear_on_submit=True):
-            nguoi_gui = st.text_input(
-                "👤 Họ và tên người gửi *",
-                placeholder="Nhập họ và tên đầy đủ của đồng chí…"
+        if la_viet_moi:
+            st.markdown("**📄 Thông tin bài viết mới**")
+            tieu_de_viet_moi = st.text_input(
+                "Tiêu đề bài viết *",
+                placeholder="Ví dụ: Infographic về chuyển đổi số năm 2025…"
+            )
+            file_uploads = st.file_uploader(
+                "📎 Tải lên file đính kèm (chọn nhiều file):",
+                type=["doc", "docx", "pdf", "png", "jpg"],
+                accept_multiple_files=True,
+            )
+        else:
+            st.markdown("**🔗 Thông tin bài sưu tầm / đăng lại**")
+            tieu_de_suu_tam = st.text_input(
+                "Tiêu đề bài sưu tầm *", 
+                placeholder="Nhập tiêu đề bài viết..."
+            )
+            link_suu_tam = st.text_input(
+                "Đường dẫn (URL bài gốc) *", 
+                placeholder="Dán link bài gốc vào đây (VD: https://baotuyenquang.com.vn/...)"
             )
 
-            # Khởi tạo các biến để tránh NameError khi lưu
-            tieu_de_viet_moi = ""
-            file_uploads = []
-            tieu_de_suu_tam = ""
-            link_suu_tam = ""
+        ghi_chu = st.text_area("💬 Ghi chú thêm:", placeholder="Không bắt buộc…")
 
-            if la_viet_moi:
-                st.markdown("**📄 Thông tin bài viết mới**")
-                tieu_de_viet_moi = st.text_input(
-                    "Tiêu đề bài viết *",
-                    placeholder="Ví dụ: Infographic về chuyển đổi số năm 2025…"
-                )
-                file_uploads = st.file_uploader(
-                    "📎 Tải lên file đính kèm (chọn nhiều file):",
-                    type=["doc", "docx", "pdf", "png", "jpg"],
-                    accept_multiple_files=True,
-                )
-            else:
-                st.markdown("**🔗 Thông tin bài sưu tầm / đăng lại**")
-                tieu_de_suu_tam = st.text_input(
-                    "Tiêu đề bài sưu tầm *", 
-                    placeholder="Nhập tiêu đề bài viết..."
-                )
-                link_suu_tam = st.text_input(
-                    "Đường dẫn (URL bài gốc) *", 
-                    placeholder="Dán link bài gốc vào đây (VD: https://baotuyenquang.com.vn/...)"
-                )
+        btn_gui = st.form_submit_button("📨 Gửi đăng ký tin bài", use_container_width=True)
 
-            ghi_chu = st.text_area("💬 Ghi chú thêm:", placeholder="Không bắt buộc…")
+        if btn_gui:
+            _xu_ly_gui(
+                nguoi_gui   = nguoi_gui,
+                la_viet_moi = la_viet_moi,
+                nguon_label = "Viết mới" if la_viet_moi else "Đề nghị đăng lại (Sưu tầm)",
+                ghi_chu     = ghi_chu,
+                tieu_de_viet_moi = tieu_de_viet_moi,
+                file_uploads     = file_uploads,
+                tieu_de_suu_tam  = tieu_de_suu_tam,
+                link_suu_tam     = link_suu_tam
+            )
 
-            btn_gui = st.form_submit_button("📨 Gửi đăng ký tin bài", use_container_width=True)
-
-            if btn_gui:
-                _xu_ly_gui(
-                    nguoi_gui   = nguoi_gui,
-                    la_viet_moi = la_viet_moi,
-                    nguon_label = "Viết mới" if la_viet_moi else "Đề nghị đăng lại (Sưu tầm)",
-                    ghi_chu     = ghi_chu,
-                    tieu_de_viet_moi = tieu_de_viet_moi,
-                    file_uploads     = file_uploads,
-                    tieu_de_suu_tam  = tieu_de_suu_tam,
-                    link_suu_tam     = link_suu_tam
-                )
-
-    # ══════════════════════════════════════════
-    # TAB 2 – TỔNG HỢP & DUYỆT
-    # ══════════════════════════════════════════
-    with tab2:
-        if not is_admin:
-            st.warning("🔒 Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để sử dụng chức năng này.")
-            st.stop()
-
+# ══════════════════════════════════════════
+# TAB 2 – TỔNG HỢP & DUYỆT
+# ══════════════════════════════════════════
+with tab2:
+    if not is_admin:
+        st.warning("🔒 Vui lòng nhập mật khẩu Quản trị ở thanh bên trái để sử dụng chức năng này.")
+    else:
         st.subheader("Bảng tổng hợp & phê duyệt trình duyệt")
         st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -562,158 +599,90 @@ def main():
                 except Exception as e:
                     st.error(f"Lỗi: {e}")
 
-    # ══════════════════════════════════════════
-    # TAB 3 – THỐNG KÊ & BIỂU ĐỒ
-    # ══════════════════════════════════════════
-    with tab3:
-        st.subheader("Báo cáo thống kê tin bài")
-        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+# ══════════════════════════════════════════
+# TAB 3 – THỐNG KÊ & BIỂU ĐỒ
+# ══════════════════════════════════════════
+with tab3:
+    st.subheader("Báo cáo thống kê tin bài")
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-        res_all = supabase.table("dang_ky_tin_bai").select("*").execute()
-        if not res_all.data:
-            st.info("Hệ thống chưa có dữ liệu tin bài.")
-        else:
-            df_all = pd.DataFrame(res_all.data)
-            df_all["ngay_dang_ky"] = pd.to_datetime(df_all["ngay_dang_ky"], errors="coerce")
-            df_all = df_all.dropna(subset=["ngay_dang_ky"])
-            df_all["Năm"] = df_all["ngay_dang_ky"].dt.year
+    res_all = supabase.table("dang_ky_tin_bai").select("*").execute()
+    if not res_all.data:
+        st.info("Hệ thống chưa có dữ liệu tin bài.")
+    else:
+        df_all = pd.DataFrame(res_all.data)
+        df_all["ngay_dang_ky"] = pd.to_datetime(df_all["ngay_dang_ky"], errors="coerce")
+        df_all = df_all.dropna(subset=["ngay_dang_ky"])
+        df_all["Năm"] = df_all["ngay_dang_ky"].dt.year
 
-            col_nam, col_kieu, col_ct = st.columns(3)
+        col_nam, col_kieu, col_ct = st.columns(3)
 
-            with col_nam:
-                ds_nam  = sorted(df_all["Năm"].unique().tolist(), reverse=True)
-                chon_nam = st.selectbox("📅 Năm:", ds_nam)
+        with col_nam:
+            ds_nam  = sorted(df_all["Năm"].unique().tolist(), reverse=True)
+            chon_nam = st.selectbox("📅 Năm:", ds_nam)
 
-            df_nam = df_all[df_all["Năm"] == chon_nam].copy()
+        df_nam = df_all[df_all["Năm"] == chon_nam].copy()
 
-            with col_kieu:
-                kieu_loc = st.selectbox("🔍 Lọc theo:", ["Cả năm", "Theo Quý", "Theo Tháng", "Theo Tuần", "Theo Ngày"])
+        with col_kieu:
+            kieu_loc = st.selectbox("🔍 Lọc theo:", ["Cả năm", "Theo Quý", "Theo Tháng", "Theo Tuần", "Theo Ngày"])
 
-            with col_ct:
-                df_loc = df_nam.copy()
-                if kieu_loc == "Theo Quý":
-                    df_nam["Quý"] = df_nam["ngay_dang_ky"].dt.quarter
-                    q_opts = sorted(df_nam["Quý"].unique())
-                    if q_opts:
-                        chon = st.selectbox("Chọn:", [f"Quý {q}" for q in q_opts])
-                        df_loc = df_nam[df_nam["Quý"] == int(chon.split()[-1])]
-                elif kieu_loc == "Theo Tháng":
-                    df_nam["Tháng"] = df_nam["ngay_dang_ky"].dt.month
-                    t_opts = sorted(df_nam["Tháng"].unique())
-                    if t_opts:
-                        chon = st.selectbox("Chọn:", [f"Tháng {t}" for t in t_opts])
-                        df_loc = df_nam[df_nam["Tháng"] == int(chon.split()[-1])]
-                elif kieu_loc == "Theo Tuần":
-                    df_nam["Tuần"] = df_nam["ngay_dang_ky"].dt.isocalendar().week
-                    tu_opts = sorted(df_nam["Tuần"].unique())
-                    if tu_opts:
-                        chon = st.selectbox("Chọn:", [f"Tuần thứ {t}" for t in tu_opts])
-                        df_loc = df_nam[df_nam["Tuần"] == int(chon.split()[-1])]
-                elif kieu_loc == "Theo Ngày":
-                    ng_opts = sorted(df_nam["ngay_dang_ky"].dt.date.unique(), reverse=True)
-                    if ng_opts:
-                        chon = st.selectbox("Chọn:", ng_opts, format_func=lambda x: x.strftime("%d/%m/%Y"))
-                        df_loc = df_nam[df_nam["ngay_dang_ky"].dt.date == chon]
-                else:
-                    st.info(f"Toàn bộ năm {chon_nam}")
-
-            st.markdown("---")
-            if df_loc.empty:
-                st.warning("Không có bài viết nào trong khoảng thời gian đã chọn.")
+        with col_ct:
+            df_loc = df_nam.copy()
+            if kieu_loc == "Theo Quý":
+                df_nam["Quý"] = df_nam["ngay_dang_ky"].dt.quarter
+                q_opts = sorted(df_nam["Quý"].unique())
+                if q_opts:
+                    chon = st.selectbox("Chọn:", [f"Quý {q}" for q in q_opts])
+                    df_loc = df_nam[df_nam["Quý"] == int(chon.split()[-1])]
+            elif kieu_loc == "Theo Tháng":
+                df_nam["Tháng"] = df_nam["ngay_dang_ky"].dt.month
+                t_opts = sorted(df_nam["Tháng"].unique())
+                if t_opts:
+                    chon = st.selectbox("Chọn:", [f"Tháng {t}" for t in t_opts])
+                    df_loc = df_nam[df_nam["Tháng"] == int(chon.split()[-1])]
+            elif kieu_loc == "Theo Tuần":
+                df_nam["Tuần"] = df_nam["ngay_dang_ky"].dt.isocalendar().week
+                tu_opts = sorted(df_nam["Tuần"].unique())
+                if tu_opts:
+                    chon = st.selectbox("Chọn:", [f"Tuần thứ {t}" for t in tu_opts])
+                    df_loc = df_nam[df_nam["Tuần"] == int(chon.split()[-1])]
+            elif kieu_loc == "Theo Ngày":
+                ng_opts = sorted(df_nam["ngay_dang_ky"].dt.date.unique(), reverse=True)
+                if ng_opts:
+                    chon = st.selectbox("Chọn:", ng_opts, format_func=lambda x: x.strftime("%d/%m/%Y"))
+                    df_loc = df_nam[df_nam["ngay_dang_ky"].dt.date == chon]
             else:
-                so_tu_viet  = len(df_loc[df_loc["nguon_tin"].str.contains("Viết mới|tự viết",  case=False, na=False)])
-                so_suu_tam  = len(df_loc[df_loc["nguon_tin"].str.contains("Sưu tầm|đăng lại", case=False, na=False)])
+                st.info(f"Toàn bộ năm {chon_nam}")
 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("📰 Tổng số bài",   len(df_loc))
-                m2.metric("✏️ Bài tự viết",   so_tu_viet)
-                m3.metric("🔗 Bài sưu tầm",   so_suu_tam)
+        st.markdown("---")
+        if df_loc.empty:
+            st.warning("Không có bài viết nào trong khoảng thời gian đã chọn.")
+        else:
+            so_tu_viet  = len(df_loc[df_loc["nguon_tin"].str.contains("Viết mới|tự viết",  case=False, na=False)])
+            so_suu_tam  = len(df_loc[df_loc["nguon_tin"].str.contains("Sưu tầm|đăng lại", case=False, na=False)])
 
-                df_bd = df_loc.groupby(["nguoi_gui", "nguon_tin"]).size().reset_index(name="Số lượng")
-                fig = px.bar(
-                    df_bd,
-                    x="nguoi_gui", y="Số lượng",
-                    color="nguon_tin",
-                    barmode="group",
-                    text="Số lượng",
-                    color_discrete_sequence=["#003466", "#C0392B"],
-                    labels={"nguoi_gui": "Người gửi", "nguon_tin": "Loại bài"},
-                )
-                fig.update_traces(textposition="outside", marker_line_width=0)
-                fig.update_layout(
-                    title=dict(text="Biểu đồ phân bổ Tin bài theo Cán bộ", font=dict(size=15, color="#003466")),
-                    plot_bgcolor="white",
-                    paper_bgcolor="white",
-                    yaxis=dict(gridcolor="#EEF2F7"),
-                    font=dict(family="Segoe UI, Arial"),
-                    legend_title="Loại tin bài",
-                )
-                st.plotly_chart(fig, use_container_width=True)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("📰 Tổng số bài",   len(df_loc))
+            m2.metric("✏️ Bài tự viết",   so_tu_viet)
+            m3.metric("🔗 Bài sưu tầm",   so_suu_tam)
 
-
-# ─────────────────────────────────────────────
-# 6. XỬ LÝ GỬI ĐĂNG KÝ (tách ra hàm riêng)
-# ─────────────────────────────────────────────
-def _xu_ly_gui(nguoi_gui, la_viet_moi, nguon_label, ghi_chu,
-               tieu_de_viet_moi, file_uploads, tieu_de_suu_tam, link_suu_tam):
-    
-    if not nguoi_gui.strip():
-        st.error("⛔ Đồng chí vui lòng điền Họ và tên trước khi gửi!")
-        return
-
-    nguoi_gui_clean = nguoi_gui.strip()
-    ghi_chu_clean   = ghi_chu.strip() if ghi_chu else ""
-
-    if la_viet_moi:
-        if not tieu_de_viet_moi.strip():
-            st.error("⛔ Vui lòng nhập Tiêu đề bài viết!")
-            return
-        if not file_uploads:
-            st.error("⛔ Đồng chí chọn 'Viết mới' nhưng chưa tải file nào lên!")
-            return
-
-        links = []
-        for f in file_uploads:
-            ts        = datetime.now().strftime("%Y%m%d%H%M%S")
-            raw_name  = f"{ts}_{f.name}"
-            safe_name = lam_sach_ten_file(raw_name)
-            try:
-                supabase.storage.from_("tin_bai").upload(safe_name, f.read())
-                url = supabase.storage.from_("tin_bai").get_public_url(safe_name)
-                links.append(url)
-            except Exception as e:
-                st.error(f"Lỗi tải file {f.name}: {e}")
-
-        if links:
-            supabase.table("dang_ky_tin_bai").insert({
-                "nguoi_gui": nguoi_gui_clean,
-                "tieu_de":   tieu_de_viet_moi.strip(),
-                "nguon_tin": nguon_label,
-                "duong_dan": "\n".join(links),
-                "ghi_chu":   ghi_chu_clean,
-            }).execute()
-            st.success(f"🎉 Đã gửi thành công 1 bài viết mới (kèm {len(file_uploads)} file đính kèm)!")
-
-    else:  # Sưu tầm
-        if not tieu_de_suu_tam.strip():
-            st.error("⛔ Vui lòng nhập tiêu đề bài sưu tầm!")
-            return
-        if not link_suu_tam.strip():
-            st.error("⛔ Vui lòng nhập đường dẫn bài sưu tầm!")
-            return
-
-        try:
-            supabase.table("dang_ky_tin_bai").insert({
-                "nguoi_gui": nguoi_gui_clean,
-                "tieu_de":   tieu_de_suu_tam.strip(),
-                "nguon_tin": nguon_label,
-                "duong_dan": link_suu_tam.strip(),
-                "ghi_chu":   ghi_chu_clean,
-            }).execute()
-            st.success("🎉 Đã gửi đăng ký bài sưu tầm thành công!")
-        except Exception as e:
-            st.error(f"Lỗi khi gửi bài sưu tầm: {e}")
-
-# ─────────────────────────────────────────────
-if __name__ == "__main__":
-    main()
+            df_bd = df_loc.groupby(["nguoi_gui", "nguon_tin"]).size().reset_index(name="Số lượng")
+            fig = px.bar(
+                df_bd,
+                x="nguoi_gui", y="Số lượng",
+                color="nguon_tin",
+                barmode="group",
+                text="Số lượng",
+                color_discrete_sequence=["#003466", "#C0392B"],
+                labels={"nguoi_gui": "Người gửi", "nguon_tin": "Loại bài"},
+            )
+            fig.update_traces(textposition="outside", marker_line_width=0)
+            fig.update_layout(
+                title=dict(text="Biểu đồ phân bổ Tin bài theo Cán bộ", font=dict(size=15, color="#003466")),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                yaxis=dict(gridcolor="#EEF2F7"),
+                font=dict(family="Segoe UI, Arial"),
+                legend_title="Loại tin bài",
+            )
+            st.plotly_chart(fig, use_container_width=True)
