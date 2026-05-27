@@ -421,53 +421,63 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
         rc[3].text = nguon_str
         rc[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Nguồn / Link – tự động gắn link cả bài mới lẫn bài đăng lại
+        # Nguồn / Link – nhãn gọn, rõ ràng
         duong_dan_raw = str(getattr(row, "duong_dan", "") or "")
         duong_dan_raw = "" if duong_dan_raw.strip().lower() in ("nan", "") else duong_dan_raw.strip()
 
         is_suu_tam = any(kw in nguon_str.lower() for kw in ["sưu tầm", "đăng lại"])
 
+        ANH_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+        def _them_hyperlink(para, nhan, url):
+            part = para.part
+            r_id = part.relate_to(
+                url,
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                is_external=True,
+            )
+            hl = OxmlElement("w:hyperlink")
+            hl.set(qn("r:id"), r_id)
+            run = OxmlElement("w:r")
+            rPr = OxmlElement("w:rPr")
+            rStyle = OxmlElement("w:rStyle")
+            rStyle.set(qn("w:val"), "Hyperlink")
+            rPr.append(rStyle)
+            run.append(rPr)
+            t = OxmlElement("w:t")
+            t.text = nhan
+            run.append(t)
+            hl.append(run)
+            para._p.append(hl)
+
         if duong_dan_raw:
             all_links = [ln.strip() for ln in duong_dan_raw.splitlines() if ln.strip()]
+            paragraph = rc[4].paragraphs[0]
+            paragraph.clear()
 
             if is_suu_tam:
-                # Bài đăng lại: hiển thị tên nguồn, 1 link duy nhất
-                hien_thi = nguon_str if nguon_str and nguon_str.lower() != "nan" else all_links[0]
-                them_hyperlink_vao_cell(rc[4], hien_thi, all_links[0])
+                _them_hyperlink(paragraph, "Link bài đăng lại", all_links[0])
             else:
-                # Bài viết mới: gắn TẤT CẢ link file đính kèm, mỗi file 1 dòng
-                paragraph = rc[4].paragraphs[0]
-                paragraph.clear()
-                part = paragraph.part
+                dem_bai = dem_anh = 0
                 for i_link, link_url in enumerate(all_links):
-                    ten_file = link_url.split("/")[-1].split("?")[0] or link_url
-                    ten_file = ten_file[:55] + "…" if len(ten_file) > 55 else ten_file
+                    ten_cuoi = link_url.split("/")[-1].split("?")[0]
+                    duoi = ("." + ten_cuoi.rsplit(".", 1)[-1].lower()) if "." in ten_cuoi else ""
+                    la_anh = duoi in ANH_EXT
 
-                    # Thêm xuống dòng giữa các file (trừ file đầu tiên)
+                    if la_anh:
+                        dem_anh += 1
+                        nhan = f"Link ảnh {dem_anh}" if len(all_links) > 1 else "Link ảnh"
+                    else:
+                        dem_bai += 1
+                        nhan = f"Link bài viết {dem_bai}" if len(all_links) > 1 else "Link bài viết"
+
                     if i_link > 0:
                         br = OxmlElement("w:br")
                         paragraph._p.append(br)
 
-                    r_id = part.relate_to(
-                        link_url,
-                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-                        is_external=True,
-                    )
-                    hyperlink = OxmlElement("w:hyperlink")
-                    hyperlink.set(qn("r:id"), r_id)
-                    new_run = OxmlElement("w:r")
-                    rPr = OxmlElement("w:rPr")
-                    rStyle = OxmlElement("w:rStyle")
-                    rStyle.set(qn("w:val"), "Hyperlink")
-                    rPr.append(rStyle)
-                    new_run.append(rPr)
-                    t = OxmlElement("w:t")
-                    t.text = ten_file
-                    new_run.append(t)
-                    hyperlink.append(new_run)
-                    paragraph._p.append(hyperlink)
+                    _them_hyperlink(paragraph, nhan, link_url)
         else:
-            rc[4].text = nguon_str if is_suu_tam else "—"
+            rc[4].text = "—"
 
         # Đề xuất MXH
         mxh = ["Web"]
