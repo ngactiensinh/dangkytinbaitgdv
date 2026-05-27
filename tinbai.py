@@ -422,22 +422,50 @@ def tao_file_word(df: pd.DataFrame, ngay_thang: str) -> bytes:
         rc[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # Nguồn / Link – tự động gắn link cả bài mới lẫn bài đăng lại
-        duong_dan = str(getattr(row, "duong_dan", "") or "")
-        duong_dan = duong_dan.strip() if duong_dan.lower() not in ("nan", "") else ""
+        duong_dan_raw = str(getattr(row, "duong_dan", "") or "")
+        duong_dan_raw = "" if duong_dan_raw.strip().lower() in ("nan", "") else duong_dan_raw.strip()
 
         is_suu_tam = any(kw in nguon_str.lower() for kw in ["sưu tầm", "đăng lại"])
 
-        if duong_dan:
-            # Lấy link đầu tiên nếu có nhiều
-            first_link = duong_dan.splitlines()[0].strip()
-            # Bài mới: hiển thị tên file (phần cuối URL); bài sưu tầm: hiển thị tên nguồn hoặc link
+        if duong_dan_raw:
+            all_links = [ln.strip() for ln in duong_dan_raw.splitlines() if ln.strip()]
+
             if is_suu_tam:
-                hien_thi = nguon_str if nguon_str and nguon_str.lower() != "nan" else first_link
+                # Bài đăng lại: hiển thị tên nguồn, 1 link duy nhất
+                hien_thi = nguon_str if nguon_str and nguon_str.lower() != "nan" else all_links[0]
+                them_hyperlink_vao_cell(rc[4], hien_thi, all_links[0])
             else:
-                # Bài mới: lấy tên file từ URL
-                hien_thi = first_link.split("/")[-1].split("?")[0] or first_link
-                hien_thi = hien_thi[:60] + "…" if len(hien_thi) > 60 else hien_thi
-            them_hyperlink_vao_cell(rc[4], hien_thi, first_link)
+                # Bài viết mới: gắn TẤT CẢ link file đính kèm, mỗi file 1 dòng
+                paragraph = rc[4].paragraphs[0]
+                paragraph.clear()
+                part = paragraph.part
+                for i_link, link_url in enumerate(all_links):
+                    ten_file = link_url.split("/")[-1].split("?")[0] or link_url
+                    ten_file = ten_file[:55] + "…" if len(ten_file) > 55 else ten_file
+
+                    # Thêm xuống dòng giữa các file (trừ file đầu tiên)
+                    if i_link > 0:
+                        br = OxmlElement("w:br")
+                        paragraph._p.append(br)
+
+                    r_id = part.relate_to(
+                        link_url,
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                        is_external=True,
+                    )
+                    hyperlink = OxmlElement("w:hyperlink")
+                    hyperlink.set(qn("r:id"), r_id)
+                    new_run = OxmlElement("w:r")
+                    rPr = OxmlElement("w:rPr")
+                    rStyle = OxmlElement("w:rStyle")
+                    rStyle.set(qn("w:val"), "Hyperlink")
+                    rPr.append(rStyle)
+                    new_run.append(rPr)
+                    t = OxmlElement("w:t")
+                    t.text = ten_file
+                    new_run.append(t)
+                    hyperlink.append(new_run)
+                    paragraph._p.append(hyperlink)
         else:
             rc[4].text = nguon_str if is_suu_tam else "—"
 
